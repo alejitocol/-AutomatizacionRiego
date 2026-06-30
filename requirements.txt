@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+plotly
+folium
+streamlit-folium
+rasterio
+geopandas
+shapely
+matplotlib
+python-docx
+requests
