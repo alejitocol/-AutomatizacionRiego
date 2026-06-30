@@ -10,3 +10,4 @@ shapely
 matplotlib
 python-docx
 requests
+psutil
