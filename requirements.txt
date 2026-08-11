@@ -1,13 +1,48 @@
-streamlit
-pandas
-numpy
-plotly
-folium
-streamlit-folium
-rasterio
-geopandas
-shapely
-matplotlib
-python-docx
-requests
-psutil
+# =====================================================================
+# Herramienta Computacional — Dependencias de Python
+# Probado con Python 3.11
+# Instalación:  pip install -r requirements.txt
+# =====================================================================
+
+# --- Interfaz web ---------------------------------------------------
+streamlit>=1.36,<2.0
+
+# --- Manejo de datos y cálculo numérico -----------------------------
+pandas>=2.1,<3.0
+numpy>=1.26,<3.0
+
+# --- Visualización --------------------------------------------------
+plotly>=5.20,<7.0
+matplotlib>=3.8,<4.0
+
+# --- Formato condicional de tablas (pandas Styler) ------------------
+Jinja2>=3.1,<4.0
+
+# --- Consumo de la API NASA POWER -----------------------------------
+requests>=2.31,<3.0
+
+# --- Geoprocesamiento ráster (WaPOR v3, GeoTIFF decadales) ----------
+rasterio>=1.3,<2.0
+
+# --- Generación de memorias de cálculo (Anexos 3, 6, 7) -------------
+python-docx>=1.1,<2.0
+
+# --- Generación del Anexo 7a en Excel (generadores_anexos.py) -------
+openpyxl>=3.1,<4.0
+
+# =====================================================================
+# DEPENDENCIAS DECLARADAS EN app.py PERO SIN USO EFECTIVO
+# ---------------------------------------------------------------------
+# Las siguientes librerías se importan en las líneas 5-6, 19 y 20-21 de
+# app.py pero no se invocan en ninguna parte del código. Son necesarias
+# únicamente mientras esos 'import' permanezcan en el archivo, ya que su
+# ausencia provoca un ModuleNotFoundError al iniciar la aplicación.
+#
+# Se recomienda eliminar dichos 'import' de app.py y, con ello, estas
+# cuatro líneas: reducen el tiempo de instalación de forma sustancial y
+# evitan conflictos de compilación de GDAL en Windows.
+# =====================================================================
+geopandas>=0.14,<2.0
+shapely>=2.0,<3.0
+folium>=0.15,<1.0
+streamlit-folium>=0.20,<1.0
