@@ -43,6 +43,11 @@ from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+# --- GENERADORES DE ANEXOS (Anexo 3a, 6, 7 Word + 7a Excel) ---
+# Módulo externo con las cuatro funciones generadoras. Debe estar en la
+# misma carpeta que app.py (generadores_anexos.py).
+import generadores_anexos as gax
+
 # --- PRUEBAS (ADR) ---
 import streamlit as st
 import pandas as pd
@@ -211,6 +216,10 @@ def crear_memoria_hidrologia(
     imagen_esquema_bytes=None,
     # Área cultivo
     area_cultivo_ha=0.0,
+    # Resumen predio
+    fuente_datos="N/D",
+    num_anios_serie=0,
+    num_sectores=1,
 ):
     from docx.shared import RGBColor, Cm
     from docx.oxml.ns import qn
@@ -285,9 +294,61 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # =========================================================
-    # SECCIÓN 2: CONTENIDO TÉCNICO - PRECIPITACIÓN DIARIA Y DECADAL
+    # SECCIÓN 2: RESUMEN DEL PREDIO
     # =========================================================
-    doc.add_heading('2. METODOLOGÍA APLICADA – CLIMATOLOGÍA', level=1)
+    doc.add_heading('2. RESUMEN DEL PREDIO', level=1)
+
+    _agregar_parrafo_justificado(doc,
+        "A continuación se presenta un resumen ejecutivo de los parámetros de diseño adoptados para el predio, "
+        "consolidando la fuente de información climática utilizada, la serie temporal analizada y las "
+        "características principales del sistema de riego y almacenamiento hídrico.")
+
+    doc.add_paragraph()
+
+    tabla_resumen = doc.add_table(rows=7, cols=2)
+    tabla_resumen.style = 'Table Grid'
+    tabla_resumen.columns[0].width = Inches(3.0)
+    tabla_resumen.columns[1].width = Inches(4.0)
+
+    area_m2_resumen = area_cultivo_ha * 10000
+    area_str_resumen = f"{area_m2_resumen:,.0f} m²".replace(",", ".")
+
+    datos_resumen = [
+        ("Fuente de datos climáticos",   fuente_datos if fuente_datos else "N/D"),
+        ("Años en la serie de datos",     str(num_anios_serie) if num_anios_serie else "N/D"),
+        ("Área determinada de riego",     area_str_resumen),
+        ("Tipo de riego",                 sistema_riego if sistema_riego else "N/D"),
+        ("Cultivo seleccionado",          nombre_cultivo if nombre_cultivo else "N/D"),
+        ("Número de sectores de riego",   str(num_sectores)),
+        ("Volumen del reservorio",        f"{vol_max:.2f} m³ ({tipo_almacenamiento})"),
+    ]
+
+    for i, (campo, valor) in enumerate(datos_resumen):
+        celda_campo = tabla_resumen.rows[i].cells[0]
+        celda_valor = tabla_resumen.rows[i].cells[1]
+        celda_campo.text = campo
+        celda_valor.text = valor
+        for run in celda_campo.paragraphs[0].runs:
+            run.bold = True
+        tc_pr_r = celda_campo._tc.get_or_add_tcPr()
+        shd_r = OxmlElement('w:shd')
+        shd_r.set(qn('w:val'),   'clear')
+        shd_r.set(qn('w:color'), 'auto')
+        shd_r.set(qn('w:fill'),  'D9E2F3')
+        tc_pr_r.append(shd_r)
+
+    p_fuente_resumen = doc.add_paragraph(f"Fuente: Elaboración propia ADR {ANO_ACTUAL}.")
+    p_fuente_resumen.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in p_fuente_resumen.runs:
+        run.italic = True
+        run.font.size = Pt(9)
+
+    doc.add_paragraph()
+
+    # =========================================================
+    # SECCIÓN 3: CONTENIDO TÉCNICO - PRECIPITACIÓN DIARIA Y DECADAL
+    # =========================================================
+    doc.add_heading('3. METODOLOGÍA APLICADA – CLIMATOLOGÍA', level=1)
 
     _agregar_parrafo_justificado(doc,
         "A continuación, se relaciona la información para los predios con los siguientes datos:")
@@ -305,7 +366,7 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # ------- 2.1 Precipitación Decadal -------
-    doc.add_heading('2.1 Precipitación Decadalf', level=2)
+    doc.add_heading('3.1 Precipitación Decadal', level=2)
     _agregar_parrafo_justificado(doc,
         "Según lo analizado en el numeral de Climatología del Informe General, para la revisión actual se debe "
         "partir de la información obtenida en WaPOR referente a la precipitación diaria, para posteriormente "
@@ -340,7 +401,7 @@ def crear_memoria_hidrologia(
         doc.add_paragraph()
 
     # ------- 2.2 Precipitación Efectiva -------
-    doc.add_heading('2.2 Precipitación Efectiva', level=2)
+    doc.add_heading('3.2 Precipitación Efectiva', level=2)
     _agregar_parrafo_justificado(doc,
         "Una vez definida la precipitación decadal, se estima la precipitación efectiva, que se entiende como "
         "la precipitación disponible para el crecimiento de las plantas y para ser utilizada por los cultivos, "
@@ -363,9 +424,9 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # =========================================================
-    # SECCIÓN 3: METODOLOGÍA APLICADA AL RESERVORIO
+    # SECCIÓN 4: METODOLOGÍA APLICADA AL RESERVORIO
     # =========================================================
-    doc.add_heading('3. METODOLOGÍA APLICADA AL RESERVORIO', level=1)
+    doc.add_heading('4. METODOLOGÍA APLICADA AL RESERVORIO', level=1)
 
     _agregar_parrafo_justificado(doc,
         "Para garantizar la continuidad del cultivo, se requirió disponer de un cuerpo de almacenamiento de "
@@ -378,7 +439,7 @@ def crear_memoria_hidrologia(
     # -------- Descripción según tipo de reservorio --------
     if es_excavado:
         # Reservorio excavado (Vaso Irregular)
-        doc.add_heading('3.1 Reservorio Excavado (Vaso Irregular)', level=2)
+        doc.add_heading('4.1 Reservorio Excavado (Vaso Irregular)', level=2)
         _agregar_parrafo_justificado(doc,
             "El reservorio utilizado en el presente proyecto corresponde a un vaso de almacenamiento de "
             "geometría irregular, dimensionado a partir de los datos batimétricos levantados en campo. "
@@ -432,7 +493,7 @@ def crear_memoria_hidrologia(
 
     else:
         # Tanque Australiano
-        doc.add_heading('3.1 Tanque Australiano (Armo-Tanque Circular)', level=2)
+        doc.add_heading('4.1 Tanque Australiano (Armo-Tanque Circular)', level=2)
         diametro_usado = diametro_tanque if diametro_tanque > 0 else (radio_tanque * 2)
         _agregar_parrafo_justificado(doc,
             f"El reservorio utilizado en el presente proyecto corresponde a un armo-tanque (reservorio tipo "
@@ -525,10 +586,10 @@ def crear_memoria_hidrologia(
             run.font.size = Pt(9)
 
     # =========================================================
-    # SECCIÓN 4: ÁREA Y VOLUMEN EN FUNCIÓN DE LA ELEVACIÓN
+    # SECCIÓN 5: ÁREA Y VOLUMEN EN FUNCIÓN DE LA ELEVACIÓN
     # =========================================================
     doc.add_paragraph()
-    doc.add_heading('4. ÁREA Y VOLUMEN EN FUNCIÓN DE LA ELEVACIÓNf', level=1)
+    doc.add_heading('5. ÁREA Y VOLUMEN EN FUNCIÓN DE LA ELEVACIÓN', level=1)
 
     _agregar_parrafo_justificado(doc,
         "El modelamiento del reservorio contempla la simulación del área y el volumen en función de la altura "
@@ -573,9 +634,9 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # =========================================================
-    # SECCIÓN 5: SIMULACIÓN DEL COMPORTAMIENTO DEL RESERVORIO
+    # SECCIÓN 6: SIMULACIÓN DEL COMPORTAMIENTO DEL RESERVORIO
     # =========================================================
-    doc.add_heading('5. SIMULACIÓN DEL COMPORTAMIENTO DEL RESERVORIOf', level=1)
+    doc.add_heading('6. SIMULACIÓN DEL COMPORTAMIENTO DEL RESERVORIO', level=1)
 
     _agregar_parrafo_justificado(doc,
         "Para analizar si un reservorio puede cumplir con las necesidades hídricas y satisfacer la demanda, "
@@ -616,9 +677,9 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # =========================================================
-    # SECCIÓN 6: TABLA DE FUNCIONAMIENTO DEL VASO
+    # SECCIÓN 7: TABLA DE FUNCIONAMIENTO DEL VASO
     # =========================================================
-    doc.add_heading('6. FUNCIONAMIENTO DEL VASO DE ALMACENAMIENTO (TABLA 2)', level=1)
+    doc.add_heading('7. FUNCIONAMIENTO DEL VASO DE ALMACENAMIENTO (TABLA 2)', level=1)
 
     _agregar_parrafo_justificado(doc,
         "La simulación del volumen del reservorio debe realizarse para cada década, de manera que se obtengan "
@@ -713,9 +774,9 @@ def crear_memoria_hidrologia(
     doc.add_paragraph()
 
     # =========================================================
-    # SECCIÓN 7: ESQUEMA REPRESENTATIVO DE ÁREAS
+    # SECCIÓN 8: ESQUEMA REPRESENTATIVO DE ÁREAS
     # =========================================================
-    doc.add_heading('7. ESQUEMA REPRESENTATIVO DE ÁREASf', level=1)
+    doc.add_heading('8. ESQUEMA REPRESENTATIVO DE ÁREAS', level=1)
 
     desc_esquema = (
         "La Ilustración 3 presenta el esquema a escala real de las obras principales del proyecto. "
@@ -757,7 +818,9 @@ def crear_memoria_hidrologia(
 
     return doc
 
-def crear_memoria_demandas(datos_cultivo):
+def crear_memoria_demandas_legacy(datos_cultivo):
+    """[OBSOLETA] Reemplazada por gax.crear_memoria_demandas() en el módulo
+    generadores_anexos. Se conserva por compatibilidad."""
     doc = Document()
     doc.add_heading('Memoria de Cálculo: Disponibilidad y Demandas hídricas', 0)
     
@@ -1164,9 +1227,13 @@ with tab1:
                                 # df_clima tiene una fila por DÉCADA con P acumulada + E y RET
                                 # El bloque común lo tratará igual que los datos NASA/WaPOR anteriores.
                                 df_base_diario = df_clima
+                                # Derivar fechas reales de la serie WaPOR desde los TIFs procesados
+                                fecha_inicio = df_clima['Fecha'].min().date()
+                                fecha_fin    = df_clima['Fecha'].max().date()
                                 st.success(
                                     f"✅ ¡Datos WaPOR procesados correctamente! "
-                                    f"{len(df_clima)} décadas con P acumulada + E + RET."
+                                    f"{len(df_clima)} décadas con P acumulada + E + RET · "
+                                    f"Serie: {fecha_inicio} → {fecha_fin}."
                                 )
 
                     except Exception as e:
@@ -1317,6 +1384,10 @@ with tab1:
         # --- GUARDADO EN VARIABLES DE SESIÓN PARA LA PESTAÑA 2 ---
         st.session_state['latitud'] = lat_input
         st.session_state['longitud'] = lon_input
+        # fecha_inicio/fin solo existen cuando la fuente es NASA POWER;
+        # para WaPOR se conserva lo que ya haya en session_state (o el default).
+        st.session_state['fecha_inicio_t1'] = fecha_inicio
+        st.session_state['fecha_fin_t1'] = fecha_fin
         st.session_state['df_promedio'] = df_promedio_decadal
         st.session_state['df_base_diario_tab1'] = df_base_diario.copy()
 
@@ -1584,20 +1655,34 @@ with tab2:
             key="fuente_clima_t2"
         )
 
+        # Leer coordenadas y fechas ejecutadas en Pestaña 1 (si existen)
+        _lat_def  = float(st.session_state.get('latitud',   8.848795))
+        _lon_def  = float(st.session_state.get('longitud', -73.609039))
+        _fi_def   = st.session_state.get('fecha_inicio_t1', pd.to_datetime("2018-01-01"))
+        _ff_def   = st.session_state.get('fecha_fin_t1',   pd.to_datetime("2025-12-31"))
+
+        if st.session_state.get('latitud') is not None:
+            st.info(
+                f"📍 Coordenadas y periodo heredados de Pestaña 1: "
+                f"Lat **{_lat_def:.6f}** | Lon **{_lon_def:.6f}** | "
+                f"{_fi_def} → {_ff_def}. "
+                f"Puedes modificarlos si necesitas un análisis diferente."
+            )
+
         col1, col2 = st.columns(2)
         with col1:
-            lat_input = st.number_input("Latitud", value=8.848795, format="%.6f", key="lat_nasa_t2")
+            lat_input = st.number_input("Latitud", value=_lat_def, format="%.6f", key="lat_nasa_t2")
         with col2:
-            lon_input = st.number_input("Longitud", value=-73.609039, format="%.6f", key="lon_nasa_t2")
+            lon_input = st.number_input("Longitud", value=_lon_def, format="%.6f", key="lon_nasa_t2")
 
         col3, col4 = st.columns(2)
         with col3:
             fecha_inicio = st.date_input(
-                "Fecha Inicio", pd.to_datetime("2018-01-01"),
+                "Fecha Inicio", value=_fi_def,
                 min_value=pd.to_datetime("2000-01-01"), key="fi_nasa_t2"
             )
         with col4:
-            fecha_fin = st.date_input("Fecha Fin", pd.to_datetime("2025-12-31"), key="ff_nasa_t2")
+            fecha_fin = st.date_input("Fecha Fin", value=_ff_def, key="ff_nasa_t2")
         st.caption(
             "ℹ️ Es posible consultar NASA POWER desde el año 2000. Si no se obtiene información para "
             "fechas más antiguas en el punto consultado, la aplicación lo señalará para que se ajuste "
@@ -1608,7 +1693,8 @@ with tab2:
         st.subheader("2. Parámetros Agronómicos y Fenología")
         ca1, ca2, ca3 = st.columns(3)
         with ca1:
-            area_total = st.number_input("Área Total (Ha)", value=0.50, step=0.1, min_value=0.01, key="area_tot")
+            area_total_m2_input = st.number_input("Área Total (m²)", value=5000.0, step=100.0, min_value=1.0, key="area_tot")
+            area_total = area_total_m2_input / 10000.0  # Conversión interna a ha para cálculos
         with ca2:
             num_sectores = st.number_input("Número de Sectores", value=1, min_value=1, step=1, key="num_sect")
         with ca3:
@@ -1626,6 +1712,17 @@ with tab2:
             "Frijol Seco": {"kc_ini": 0.40, "kc_mid": 1.15, "kc_end": 0.35, "L_ini": 2, "L_dev": 3, "L_mid": 4, "L_late": 2},
             "Yuca (Cassava)": {"kc_ini": 0.30, "kc_mid": 1.10, "kc_end": 0.50, "L_ini": 2, "L_dev": 4, "L_mid": 15, "L_late": 6},
             "Ñame (Yam)": {"kc_ini": 0.30, "kc_mid": 1.10, "kc_end": 0.60, "L_ini": 6, "L_dev": 8, "L_mid": 12, "L_late": 4},
+            # Cacao (Theobroma cacao) - cultivo perenne de cobertura permanente, SIN valor
+            # oficial en la Tabla 12 de FAO-56 (no está entre los ~84 cultivos tabulados).
+            # Valores adaptados con la metodología FAO-56 (Allen et al., 2006) a partir de
+            # literatura regional para plantación adulta en plena producción (dosel cerrado):
+            # Kc_mid ≈ 1.10 (dosel completo, cultivo permanente) y Kc promedio ≈ 1.05.
+            # Al ser perenne y de hoja persistente NO tiene fase de senescencia como los anuales;
+            # aquí "L_ini/L_dev" representan el rebrote foliar y la floración-cuajado (menor Kc
+            # por dosel parcialmente abierto tras poda) y "L_mid/L_late" representan llenado y
+            # maduración de mazorca con dosel cerrado. Las 4 fases suman 36 décadas (año completo)
+            # para reflejar su ciclo reproductivo continuo (sin período de descanso/barbecho).
+            "Cacao (Theobroma cacao)": {"kc_ini": 0.90, "kc_mid": 1.10, "kc_end": 1.05, "L_ini": 4, "L_dev": 4, "L_mid": 20, "L_late": 8},
             "Personalizado": {"kc_ini": 0.40, "kc_mid": 1.10, "kc_end": 0.60, "L_ini": 3, "L_dev": 4, "L_mid": 4, "L_late": 3}
         }
 
@@ -1694,12 +1791,39 @@ with tab2:
             with cs2: caudal_emisor_lh = st.number_input("Caudal del Aspersor (L/h)", value=500.0, step=10.0, min_value=1.0, key="q_asp")
 
         # Inputs de eficiencia
-        ce1, ce2, ce3, ce4, ce5 = st.columns(5)
+        ce1, ce2, ce3 = st.columns(3)
         with ce1: area_sombreada = st.number_input("% Sombreado", value=65.0, step=5.0, min_value=0.0, max_value=100.0, key="a_som")
         with ce2: pct_sustrato = st.number_input("% Sustrato", value=100.0, step=5.0, min_value=0.0, max_value=100.0, key="p_sus")
-        with ce3: ef_cond = st.number_input("% Ef. Cond", value=98.0, step=1.0, min_value=0.0, max_value=100.0, key="ef_c")
-        with ce4: ef_dist = st.number_input("% Ef. Dist", value=98.0, step=1.0, min_value=0.0, max_value=100.0, key="ef_d")
-        with ce5: ef_rieg = st.number_input("% Ef. Riego", value=90.0, step=1.0, min_value=0.0, max_value=100.0, key="ef_r")
+
+        # Eficiencia global generalizada = Ef.Conducción × Ef.Distribución × Ef.Aplicación,
+        # concentradas en un solo valor representativo según el tipo de riego seleccionado,
+        # en vez de tres campos numéricos independientes que el usuario debía multiplicar
+        # mentalmente. Los rangos siguen los valores típicos de literatura de diseño de riego
+        # (FAO 56 / ADR): aspersión 75-85%, goteo 85-95%.
+        if tipo_riego == "Riego por goteo":
+            opciones_eficiencia = {
+                "85% — Típica (sistema convencional, cierto deterioro)": 0.85,
+                "90% — Buena (sistema bien mantenido)": 0.90,
+                "95% — Óptima (excelente, mejor caso de mercado)": 0.95,
+            }
+            default_ef_idx = 1  # 90%
+        else:
+            opciones_eficiencia = {
+                "75% — Típica (aspersión convencional)": 0.75,
+                "80% — Buena (aspersión bien diseñada)": 0.80,
+                "85% — Óptima (mejor caso de mercado)": 0.85,
+            }
+            default_ef_idx = 2  # 85%
+        with ce3:
+            etiqueta_ef_sel = st.selectbox(
+                "Eficiencia global del sistema (Cond. × Dist. × Aplicación)",
+                options=list(opciones_eficiencia.keys()),
+                index=default_ef_idx,
+                key="ef_global_sel",
+                help="Concentra en un solo valor la eficiencia de conducción, distribución y aplicación "
+                     "de riego, cuyo producto es la eficiencia generalizada usada en el requerimiento bruto."
+            )
+        ef_global = opciones_eficiencia[etiqueta_ef_sel]
 
         # ---------------------------------------------------------------
         # BOTÓN DE EJECUCIÓN PRINCIPAL - PESTAÑA 2
@@ -1798,9 +1922,9 @@ with tab2:
                 df_balance['Rn_mm']  = np.maximum(df_balance['ETc_mm'] - df_balance['Pe_mm'], 0.0)
 
                 # 5. Requerimiento bruto según tipo de riego
-                ef_total = (ef_cond / 100.0) * (ef_dist / 100.0) * (ef_rieg / 100.0)
-                ef_total = max(ef_total, 0.01)
+                ef_total = max(ef_global, 0.01)
                 df_balance['Rb_mm'] = df_balance['Rn_mm'] / ef_total
+                st.session_state['t2_ef_total_calc'] = ef_total
 
                 # 6. Caudal de diseño decadal (m³/s o L/s según tipo de riego)
                 dias_decada = np.array([10,10,11, 10,10,8, 10,10,11, 10,10,10,
@@ -2000,10 +2124,13 @@ with tab3:
     st.divider()
 
     # Nombre para guardar la simulación
+    _tipo_riego_tag = "Goteo" if st.session_state.get('tipo_riego_calc', st.session_state.get('tipo_riego', 'Riego por goteo')) == "Riego por goteo" else "Aspersion"
     nombre_guardado_input = st.text_input(
         "💾 Nombre para guardar esta simulación (se guarda al finalizar la simulación):",
-        value=f"Sim_{'NASA' if usar_nasa_sim else 'WaPOR'}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}",
-        key="nombre_guardado_sim"
+        value=f"Sim_{'NASA' if usar_nasa_sim else 'WaPOR'}_{_tipo_riego_tag}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}",
+        key="nombre_guardado_sim",
+        help="Incluya el tipo de riego en el nombre (ya sugerido por defecto) para poder distinguir "
+             "en el historial las simulaciones de goteo y de aspersión sin que se sobrescriban entre sí."
     )
 
     st.divider()
@@ -2260,7 +2387,7 @@ with tab3:
                     if tipo_riego == "Riego por goteo":
                         s_d = (q_diseno_decadal[decada_idx] * t_max * 3600 * dias) / 1000.0
                     else:
-                        s_d = (q_diseno_decadal[decada_idx] * 86.4 * dias) 
+                        s_d = (q_diseno_decadal[decada_idx] * 86400 * dias) 
                     
                     s_e = area_espejo_actual * (e_dec_mm / 1000.0) # Evaporación usa el área dinámica
                     s_i = s_e * 0.10 # Asumes infiltración como 10% de evaporación
@@ -2315,6 +2442,9 @@ with tab3:
                     'n_anios': df_chrono['Año'].nunique(),
                     'v_max':   v_max,
                     'v_rippl': None,  # se actualizará tras el cálculo Rippl abajo
+                    'tipo_riego': st.session_state.get('tipo_riego_calc', tipo_riego),
+                    'eficiencia_global': st.session_state.get('t2_ef_total_calc', None),
+                    'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
                 }
 
                 # --- Guardar parámetros del reservorio para el Anexo 3 ---
@@ -2471,7 +2601,7 @@ with tab3:
                     x0=0, y0=0, x1=lado_cultivo, y1=lado_cultivo,
                     line_color="DarkGreen", fillcolor="LightGreen", opacity=0.3
                 )
-                fig_esq.add_annotation(x=lado_cultivo/2, y=lado_cultivo/2, text=f"Área de Cultivo<br>({area_cultivo_ha} ha)", showarrow=False)
+                fig_esq.add_annotation(x=lado_cultivo/2, y=lado_cultivo/2, text=f"Área de Cultivo<br>({area_cultivo_ha * 10000:,.0f} m²)", showarrow=False)
 
                 # --- 4. DIBUJAR EL ALMACENAMIENTO ---
                 if forma_dibujo == "circulo":
@@ -2543,7 +2673,7 @@ with tab3:
                     )
                     ax_esq.add_patch(cult_rect)
                     ax_esq.text(_lado_cult/2, _lado_cult/2,
-                                f"Área de Cultivo\n{_area_cult_ha:.2f} ha",
+                                f"Área de Cultivo\n{_area_cult_ha * 10000:,.0f} m²",
                                 ha='center', va='center', fontsize=9, color='darkgreen', fontweight='bold')
 
                     # Reservorio
@@ -2631,7 +2761,7 @@ with tab3:
                     area_tejado_texto = f"{area_tejado_fisica:.2f} m²" if habilitar_cosecha and area_tejado_fisica > 0 else "No implementada"
                     area_cultivo_ha = st.session_state.get('area_total_ha', 0.5)
 
-                    st.info(f"**Diseño Actual Analizado:**\n{texto_almacenamiento}\n* Área Cultivo: {area_cultivo_ha:.2f} Ha\n* Área Ramada: {area_tejado_texto}")
+                    st.info(f"**Diseño Actual Analizado:**\n{texto_almacenamiento}\n* Área Cultivo: {area_cultivo_ha * 10000:,.0f} m²\n* Área Ramada: {area_tejado_texto}")
                 
                 with col_diag2:
                     if deficit_maximo_registrado > 0:
@@ -2670,7 +2800,7 @@ with tab3:
                                 if tipo_riego == "Riego por goteo":
                                     s_d_s = (q_diseno_decadal[d_idx] * factor_area * t_max * 3600 * dias_d[d_idx]) / 1000.0
                                 else:
-                                    s_d_s = (q_diseno_decadal[d_idx] * factor_area * 86.4 * dias_d[d_idx])
+                                    s_d_s = (q_diseno_decadal[d_idx] * factor_area * 86400 * dias_d[d_idx])
                                 
                                 s_e_s = area_sim * (e_mm / 1000.0)
                                 s_i_s = s_e_s * 0.10
@@ -2698,10 +2828,10 @@ with tab3:
                             if radio_ideal > 20.0:
                                 st.warning(f"🏗️ **Opción 1 (Estructural):** Subir el radio a **{radio_ideal:.2f} m** es inviable (>20m). Te recomendamos aumentar el área de la ramada.")
                             else:
-                                st.info(f"🏗️ **Opción 1 (Estructural):** Incrementa el radio del tanque a **{radio_ideal:.2f} metros** para mantener las {area_cultivo_ha:.2f} Ha actuales de cultivo.")
+                                st.info(f"🏗️ **Opción 1 (Estructural):** Incrementa el radio del tanque a **{radio_ideal:.2f} metros** para mantener los {area_cultivo_ha * 10000:,.0f} m² actuales de cultivo.")
                             
                         if area_optima > 0.01:
-                            st.success(f"🌱 **Opción 2 (Agronómica):** Si no puedes agrandar el reservorio, debes reducir el área de cultivo a máximo **{area_optima:.3f} Ha** ({(area_optima*10000):.0f} m²) para garantizar agua todo el año.")
+                            st.success(f"🌱 **Opción 2 (Agronómica):** Si no puedes agrandar el reservorio, debes reducir el área de cultivo a máximo **{area_optima * 10000:,.0f} m²** para garantizar agua todo el año.")
                         else:
                             st.error(f"🌱 **Opción 2 (Agronómica):** El reservorio propuesto es tan pequeño que no puede sostener ni 0.01 Ha. ¡Necesitas rediseñar urgentemente o buscar una concesión de agua!")
                     else:
@@ -2736,7 +2866,7 @@ with tab3:
                             if tipo_riego == "Riego por goteo":
                                 s_d_r = (q_diseno_decadal[d_idx_r] * t_max * 3600 * dias_d[d_idx_r]) / 1000.0
                             else:
-                                s_d_r = (q_diseno_decadal[d_idx_r] * 86.4 * dias_d[d_idx_r])
+                                s_d_r = (q_diseno_decadal[d_idx_r] * 86400 * dias_d[d_idx_r])
                             s_e_r = area_r * (e_mm_r / 1000.0)
                             s_i_r = s_e_r * 0.10
                             v_temp_r = v_sim + e_cp_r + e_ll_r + e_es_r - s_d_r - s_e_r - s_i_r
@@ -2779,6 +2909,63 @@ with tab3:
                     st.warning(f"No se pudo calcular el volumen Rippl: {e_rippl}")
 
                 # ─────────────────────────────────────────────────────────
+                # V* MÍNIMO — REFERENCIA CONVENCIONAL (CICLO ÚNICO, ÚLTIMO AÑO)
+                # Replica la búsqueda iterativa de Rippl restringida al último
+                # año disponible de la serie cargada (NASA o WaPOR), emulando
+                # el criterio de dimensionamiento convencional sin continuidad
+                # multianual. Por construcción, V* aquí debe ser ≤ que el V*
+                # obtenido sobre la serie histórica completa.
+                # ─────────────────────────────────────────────────────────
+                try:
+                    anio_max_serie = int(df_chrono['Año'].max())
+                    df_ultimo_anio = df_chrono[df_chrono['Año'] == anio_max_serie]
+
+                    v_candidatos_u = np.arange(10, 5001, 5)
+                    v_rippl_ultimo = None
+                    for v_cand_u in v_candidatos_u:
+                        v_sim_u = v_cand_u
+                        fallo_u = False
+                        for _, row_u in df_ultimo_anio.iterrows():
+                            d_idx_u = int(row_u['Decada_Año']) - 1
+                            p_mm_u, e_mm_u = row_u['Precipitacion'], row_u['Evaporacion']
+                            if es_excavado:
+                                area_u = func_area(min(v_sim_u, vol_max_sistema)) if v_sim_u > 0 else func_area(0)
+                                e_es_u = 0.0
+                            else:
+                                area_u = math.pi * (radio_tanque ** 2)
+                                e_es_u = area_tejado_efectiva * (p_mm_u / 1000.0)
+                            e_cp_u = (caudal_concesion * 86400 * dias_d[d_idx_u]) / 1000.0
+                            e_ll_u = area_u * (p_mm_u / 1000.0)
+                            if tipo_riego == "Riego por goteo":
+                                s_d_u = (q_diseno_decadal[d_idx_u] * t_max * 3600 * dias_d[d_idx_u]) / 1000.0
+                            else:
+                                s_d_u = (q_diseno_decadal[d_idx_u] * 86400 * dias_d[d_idx_u])
+                            s_e_u = area_u * (e_mm_u / 1000.0)
+                            s_i_u = s_e_u * 0.10
+                            v_temp_u = v_sim_u + e_cp_u + e_ll_u + e_es_u - s_d_u - s_e_u - s_i_u
+                            if v_temp_u < 0:
+                                fallo_u = True
+                                break
+                            v_sim_u = min(v_cand_u, v_temp_u)
+                        if not fallo_u:
+                            v_rippl_ultimo = v_cand_u
+                            break
+
+                    if v_rippl_ultimo is not None:
+                        st.info(
+                            f"📌 **Referencia convencional (ciclo único, año {anio_max_serie}):** "                            f"V* = {v_rippl_ultimo:.0f} m³ — volumen mínimo necesario para sostener el cultivo "                            f"usando únicamente el último año disponible de la serie, sin continuidad multianual. "                            f"Este valor sustituye la referencia P75% de década crítica en la Tabla 7."                        )
+                        if usar_nasa_sim:
+                            st.session_state['v_rippl_ultimo_anio_nasa'] = v_rippl_ultimo
+                            st.session_state['anio_ultimo_nasa'] = anio_max_serie
+                        else:
+                            st.session_state['v_rippl_ultimo_anio_wapor'] = v_rippl_ultimo
+                            st.session_state['anio_ultimo_wapor'] = anio_max_serie
+                    else:
+                        st.warning("🚫 No se encontró un V* de referencia convencional (último año) ≤ 5,000 m³.")
+                except Exception as e_ultimo:
+                    st.warning(f"No se pudo calcular el V* de referencia convencional (último año): {e_ultimo}")
+
+                # ─────────────────────────────────────────────────────────
                 # CURVA PARAMÉTRICA V* vs VENTANA DE AÑOS SIMULADOS (NASA POWER)
                 # Sección 7.1 — sensibilidad del volumen óptimo frente a la
                 # longitud de la ventana histórica analizada (Rippl moderno
@@ -2817,7 +3004,7 @@ with tab3:
                                     if tipo_riego == "Riego por goteo":
                                         s_d_s2 = (q_diseno_decadal[d_idx_s] * t_max * 3600 * dias_d[d_idx_s]) / 1000.0
                                     else:
-                                        s_d_s2 = (q_diseno_decadal[d_idx_s] * 86.4 * dias_d[d_idx_s])
+                                        s_d_s2 = (q_diseno_decadal[d_idx_s] * 86400 * dias_d[d_idx_s])
                                     s_e_s2 = area_s * (e_mm_s / 1000.0)
                                     s_i_s2 = s_e_s2 * 0.10
                                     v_temp_s2 = v_sim_s + e_cp_s2 + e_ll_s2 + e_es_s2 - s_d_s2 - s_e_s2 - s_i_s2
@@ -2963,16 +3150,46 @@ with tab4:
 
     st.divider()
 
-    # Fila ciclo único (referencia P75%)
+    # Filas ciclo único (referencia convencional) — V* Rippl calculado
+    # únicamente sobre el último año disponible de cada fuente, en lugar
+    # del volumen físico del sistema. Esto produce un V* de referencia
+    # comparable metodológicamente con las simulaciones multianuales, y
+    # se espera que sea inferior al V* obtenido con series históricas
+    # largas (NASA/WaPOR), evidenciando el riesgo de subdimensionar con
+    # el criterio convencional de ciclo único.
+    v_rippl_ultimo_nasa = st.session_state.get('v_rippl_ultimo_anio_nasa', None)
+    v_rippl_ultimo_wapor = st.session_state.get('v_rippl_ultimo_anio_wapor', None)
+    anio_ultimo_nasa = st.session_state.get('anio_ultimo_nasa', None)
+    anio_ultimo_wapor = st.session_state.get('anio_ultimo_wapor', None)
+
     filas_t7 = []
-    filas_t7.append({
-        "Ventana de análisis": "Ciclo único (P75% década crítica)",
-        "Fuente": "Referencia convencional",
-        "Años": "—",
-        "V* estimado (m³)": f"{v_max_sim:.0f}" if v_max_sim > 0 else "N/D (ejecute Pestaña 3)",
-        "Eventos ENSO cubiertos": "0 (no aplica)",
-        "Observación": "Dimensionamiento convencional sin simulación continua"
-    })
+    if v_rippl_ultimo_wapor is not None:
+        filas_t7.append({
+            "Ventana de análisis": f"Ciclo único — último año WaPOR ({anio_ultimo_wapor})",
+            "Fuente": "Referencia convencional",
+            "Años": "1",
+            "V* estimado (m³)": f"{v_rippl_ultimo_wapor:.0f}",
+            "Eventos ENSO cubiertos": "0 (no aplica)",
+            "Observación": "Dimensionamiento convencional sin continuidad multianual (Rippl sobre 1 año, fuente WaPOR)"
+        })
+    if v_rippl_ultimo_nasa is not None:
+        filas_t7.append({
+            "Ventana de análisis": f"Ciclo único — último año NASA ({anio_ultimo_nasa})",
+            "Fuente": "Referencia convencional",
+            "Años": "1",
+            "V* estimado (m³)": f"{v_rippl_ultimo_nasa:.0f}",
+            "Eventos ENSO cubiertos": "0 (no aplica)",
+            "Observación": "Dimensionamiento convencional sin continuidad multianual (Rippl sobre 1 año, fuente NASA POWER)"
+        })
+    if not filas_t7:
+        filas_t7.append({
+            "Ventana de análisis": "Ciclo único (referencia convencional)",
+            "Fuente": "Referencia convencional",
+            "Años": "1",
+            "V* estimado (m³)": "N/D (ejecute Pestaña 3)",
+            "Eventos ENSO cubiertos": "0 (no aplica)",
+            "Observación": "Ejecute la simulación en Pestaña 3 con NASA y/o WaPOR para calcular el V* del último año"
+        })
 
     # Fila WaPOR — usa su propio V* Rippl
     if wapor_ok:
@@ -2990,6 +3207,7 @@ with tab4:
 
     # Filas NASA según ventana — usa su propio V* Rippl
     if nasa_ok and df_nasa_base is not None:
+        n_filas_antes_nasa = len(filas_t7)
         for ventana, label, enso_txt in [
             (10, "10 años", "2015-2016"),
             (20, "20 años", "2005-2016"),
@@ -3007,7 +3225,7 @@ with tab4:
                     "Eventos ENSO cubiertos": enso_txt,
                     "Observación": "Serie larga, estándar OMM" if ventana == 30 else "Serie media"
                 })
-        if len(filas_t7) <= (2 if wapor_ok else 1):  # no se agregó ninguna ventana NASA
+        if len(filas_t7) == n_filas_antes_nasa:  # no se agregó ninguna ventana NASA
             v_nasa_str = (f"{v_rippl_nasa:.0f}" if v_rippl_nasa else "Ejecute Pestaña 3 con NASA")
             filas_t7.append({
                 "Ventana de análisis": f"NASA POWER ({anios_nasa_n} años disponibles)",
@@ -3026,102 +3244,96 @@ with tab4:
 
     # ─────────────────────────────────────────────────────────────────────
     # SECCIÓN A.2 — COMPARACIÓN V* POR TIPO DE RIEGO: GOTEO vs ASPERSIÓN
+    # A partir del historial acumulado de simulaciones guardadas (Pestaña 3),
+    # NO de un recálculo en vivo con los parámetros compartidos actuales.
+    # Esto evita que la tabla sólo refleje la última ejecución de Pestaña 2/3:
+    # cada tipo de riego conserva su propia simulación guardada (con su propia
+    # eficiencia y, potencialmente, su propio dimensionamiento de reservorio),
+    # de manera que el V* de goteo y el V* de aspersión queden claramente
+    # diferenciados aunque se hayan calculado en momentos distintos.
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("💧 Comparación del Volumen Útil (V*) — Riego por Goteo vs Riego por Aspersión")
     st.caption(
-        "Recalcula el volumen útil mínimo (V*, método de Rippl moderno) bajo ambas condiciones de "
-        "riego —goteo y aspersión— sobre la misma serie climática, manteniendo fijos los demás "
-        "parámetros del reservorio (concesión, geometría, cosecha de techo)."
+        "Compara el volumen útil mínimo (V*, método de Rippl moderno) entre la simulación guardada "
+        "más reciente para riego por goteo y la simulación guardada más reciente para riego por "
+        "aspersión, por cada fuente climática. Cada simulación conserva su propia eficiencia global "
+        "y, si fue modificado entre ejecuciones, su propio dimensionamiento de reservorio — a "
+        "diferencia de un recálculo en vivo, que solo reflejaría los parámetros de la última corrida "
+        "de la Pestaña 2/3."
     )
 
-    dias_decada_t4 = np.array([10,10,11, 10,10,8, 10,10,11, 10,10,10,
-                                10,10,11, 10,10,10, 10,10,11, 10,10,11,
-                                10,10,10, 10,10,11, 10,10,10, 10,10,11])
+    historial_t4 = st.session_state.get('historial_simulaciones', {})
 
-    def buscar_v_rippl_por_metodo(df_serie, q_arr, metodo, params):
-        if df_serie is None or df_serie.empty or q_arr is None:
-            return None
-        v_candidatos_m = np.arange(10, 5001, 5)
-        for v_cand_m in v_candidatos_m:
-            v_sim_m = v_cand_m
-            fallo_m = False
-            for _, row_m in df_serie.iterrows():
-                d_idx_m = int(row_m['Decada_Año']) - 1
-                p_mm_m, e_mm_m = row_m['Precipitacion'], row_m['Evaporacion']
-                if params['es_excavado']:
-                    area_m = params['vol_max_sistema'] / max(params['altura_tanque'], 0.01) if params['altura_tanque'] else 0.0
-                    e_es_m = 0.0
-                else:
-                    area_m = math.pi * (params['radio_tanque'] ** 2)
-                    e_es_m = params['area_tejado_efectiva'] * (p_mm_m / 1000.0)
-                e_cp_m = (params['caudal_concesion'] * 86400 * dias_decada_t4[d_idx_m]) / 1000.0
-                e_ll_m = area_m * (p_mm_m / 1000.0)
-                if metodo == "goteo":
-                    s_d_m = (q_arr[d_idx_m] * params['t_max'] * 3600 * dias_decada_t4[d_idx_m]) / 1000.0
-                else:
-                    s_d_m = (q_arr[d_idx_m] * 86.4 * dias_decada_t4[d_idx_m])
-                s_e_m = area_m * (e_mm_m / 1000.0)
-                s_i_m = s_e_m * 0.10
-                v_temp_m = v_sim_m + e_cp_m + e_ll_m + e_es_m - s_d_m - s_e_m - s_i_m
-                if v_temp_m < 0:
-                    fallo_m = True
-                    break
-                v_sim_m = min(v_cand_m, v_temp_m)
-            if not fallo_m:
-                return v_cand_m
-        return None
+    def _ultima_sim_por_tipo(historial, fuente_label, tipo_riego_label):
+        """Devuelve (nombre, dict) de la simulación guardada más reciente que coincide
+        con la fuente y el tipo de riego indicados, o (None, None) si no existe."""
+        candidatas = [
+            (nombre, datos) for nombre, datos in historial.items()
+            if datos.get('fuente') == fuente_label
+            and datos.get('tipo_riego') == tipo_riego_label
+            and datos.get('v_rippl') is not None
+        ]
+        if not candidatas:
+            return None, None
+        candidatas.sort(key=lambda x: x[1].get('timestamp', ''), reverse=True)
+        return candidatas[0]
 
-    q_goteo_sess = st.session_state.get('q_diseno_decadal_goteo', None)
-    q_aspersion_sess = st.session_state.get('q_diseno_decadal_aspersion', None)
-    params_reservorio_t4 = {
-        'es_excavado': st.session_state.get('es_excavado_flag', False),
-        'vol_max_sistema': st.session_state.get('volumen_maximo_sistema', 0.0),
-        'radio_tanque': st.session_state.get('radio_tanque_val', 0.0),
-        'altura_tanque': st.session_state.get('altura_tanque_val', 0.0),
-        'area_tejado_efectiva': st.session_state.get('area_tejado_efectiva_val', 0.0),
-        'caudal_concesion': st.session_state.get('caudal_concesion_val', 0.0),
-        't_max': st.session_state.get('t_max_riego_val', 12),
-    }
-
-    if q_goteo_sess is None or q_aspersion_sess is None:
-        st.info("Ejecute primero el cálculo de Balance Hídrico en la Pestaña 2 para habilitar esta comparación.")
+    if not historial_t4:
+        st.info(
+            "Aún no hay simulaciones guardadas en el historial. Ejecute la Pestaña 3 (que guarda "
+            "automáticamente cada corrida en el historial) primero con riego por goteo y luego con "
+            "riego por aspersión — para la misma fuente — para habilitar esta comparación."
+        )
     else:
         filas_riego_cmp = []
-        for fuente_label_cmp, df_base_cmp, anios_n_cmp in [
-            ("NASA POWER", df_nasa_base, anios_nasa_n),
-            ("WaPOR v3", df_wapor_base, anios_wapor_n),
-        ]:
-            if df_base_cmp is None or df_base_cmp.empty:
+        for fuente_label_cmp in ["NASA POWER", "WaPOR v3"]:
+            nombre_got, datos_got = _ultima_sim_por_tipo(historial_t4, fuente_label_cmp, "Riego por goteo")
+            nombre_asp, datos_asp = _ultima_sim_por_tipo(historial_t4, fuente_label_cmp, "Riego por aspersión")
+            if datos_got is None and datos_asp is None:
                 continue
-            df_base_dec_cmp = df_base_cmp.copy()
-            if 'Decada_Año' not in df_base_dec_cmp.columns:
-                df_base_dec_cmp = agregar_decadas(df_base_dec_cmp)
-            df_chrono_cmp = df_base_dec_cmp.groupby(['Año', 'Decada_Año'])[['Precipitacion', 'Evaporacion']].sum().reset_index()
 
-            try:
-                v_got = buscar_v_rippl_por_metodo(df_chrono_cmp, q_goteo_sess, "goteo", params_reservorio_t4)
-                v_asp = buscar_v_rippl_por_metodo(df_chrono_cmp, q_aspersion_sess, "aspersion", params_reservorio_t4)
-                filas_riego_cmp.append({
-                    "Fuente": fuente_label_cmp,
-                    "Años analizados": anios_n_cmp,
-                    "V* Riego por Goteo (m³)": f"{v_got:.0f}" if v_got is not None else "No converge ≤5000 m³",
-                    "V* Riego por Aspersión (m³)": f"{v_asp:.0f}" if v_asp is not None else "No converge ≤5000 m³",
-                    "Diferencia (m³)": f"{(v_asp - v_got):+.0f}" if (v_got is not None and v_asp is not None) else "—",
-                })
-            except Exception as e_cmp_riego:
-                st.warning(f"No se pudo calcular la comparación goteo/aspersión para {fuente_label_cmp}: {e_cmp_riego}")
+            v_got = datos_got['v_rippl'] if datos_got else None
+            v_asp = datos_asp['v_rippl'] if datos_asp else None
+            ef_got = datos_got.get('eficiencia_global') if datos_got else None
+            ef_asp = datos_asp.get('eficiencia_global') if datos_asp else None
+
+            filas_riego_cmp.append({
+                "Fuente": fuente_label_cmp,
+                "V* Riego por Goteo (m³)": f"{v_got:.0f}" if v_got is not None else "Sin simulación guardada",
+                "Eficiencia (Goteo)": f"{ef_got*100:.0f}%" if ef_got else "—",
+                "Simulación (Goteo)": f"{nombre_got} · {datos_got['timestamp']}" if datos_got else "—",
+                "V* Riego por Aspersión (m³)": f"{v_asp:.0f}" if v_asp is not None else "Sin simulación guardada",
+                "Eficiencia (Aspersión)": f"{ef_asp*100:.0f}%" if ef_asp else "—",
+                "Simulación (Aspersión)": f"{nombre_asp} · {datos_asp['timestamp']}" if datos_asp else "—",
+                "Diferencia (m³)": f"{(v_asp - v_got):+.0f}" if (v_got is not None and v_asp is not None) else "—",
+            })
 
         if filas_riego_cmp:
             df_riego_cmp = pd.DataFrame(filas_riego_cmp)
             st.dataframe(df_riego_cmp, use_container_width=True, hide_index=True)
+            faltantes = [f["Fuente"] for f in filas_riego_cmp
+                         if "Sin simulación" in f["V* Riego por Goteo (m³)"] or "Sin simulación" in f["V* Riego por Aspersión (m³)"]]
+            if faltantes:
+                st.warning(
+                    f"⚠️ Falta al menos un tipo de riego guardado para: {', '.join(faltantes)}. "
+                    f"Vuelva a la Pestaña 2, seleccione el tipo de riego faltante (ajustando su "
+                    f"eficiencia si corresponde), ejecute el balance y corra la simulación en la "
+                    f"Pestaña 3 nuevamente — quedará guardada en el historial sin sobrescribir la anterior, "
+                    f"siempre que use un nombre de simulación distinto en el campo '💾 Nombre para guardar "
+                    f"esta simulación'."
+                )
             st.caption(
                 "El riego por aspersión, al distribuir el caudal en un periodo más prolongado (jornada "
                 "completa), suele requerir reservorios de menor volumen útil que el riego por goteo bajo "
-                "el mismo régimen de horas de riego configurado en la Pestaña 2, aunque ambos parten del "
-                "mismo requerimiento bruto decadal (Rb_mm)."
+                "el mismo régimen de horas de riego, aunque ambos parten del mismo requerimiento bruto "
+                "decadal (Rb_mm). La diferencia exacta depende también de la eficiencia global elegida "
+                "para cada simulación."
             )
         else:
-            st.info("Cargue y procese datos NASA POWER y/o WaPOR v3 en la Pestaña 1 para habilitar esta comparación.")
+            st.info(
+                "No se encontraron simulaciones guardadas para NASA POWER ni WaPOR v3 con un tipo de "
+                "riego identificado. Ejecute y guarde al menos una simulación en la Pestaña 3."
+            )
 
     st.divider()
 
@@ -3333,39 +3545,48 @@ with tab4:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("📋 Tabla 9 — Comparación: Dimensionamiento Ciclo Único vs Simulación Continua")
 
+    if v_rippl_ultimo_wapor is not None and v_rippl_ultimo_nasa is not None:
+        v_ciclo_unico_t9 = f"WaPOR: {v_rippl_ultimo_wapor:.0f} / NASA: {v_rippl_ultimo_nasa:.0f}"
+    elif v_rippl_ultimo_wapor is not None:
+        v_ciclo_unico_t9 = f"{v_rippl_ultimo_wapor:.0f} (WaPOR, último año)"
+    elif v_rippl_ultimo_nasa is not None:
+        v_ciclo_unico_t9 = f"{v_rippl_ultimo_nasa:.0f} (NASA, último año)"
+    else:
+        v_ciclo_unico_t9 = "N/D"
+
     df_t9_filas = [
         {"Dimensión evaluada": "Volumen óptimo identificado (m³)",
-         "Ciclo único (P75%)": f"{v_max_sim:.0f}" if v_max_sim > 0 else "N/D",
+         "Ciclo único (últ. año)": v_ciclo_unico_t9,
          "Rippl NASA POWER": f"{v_rippl_nasa:.0f}" if v_rippl_nasa else ("Simule con NASA" if nasa_ok else "Sin datos"),
          "Rippl WaPOR v3": f"{v_rippl_wapor:.0f}" if v_rippl_wapor else ("Simule con WaPOR" if wapor_ok else "Sin datos"),
-         "Observación": "El Rippl captura episodios ENSO severos"},
+         "Observación": "El Rippl captura episodios ENSO severos; el ciclo único solo cubre el último año"},
         {"Dimensión evaluada": "Eventos ENSO verificados",
-         "Ciclo único (P75%)": "0 (no aplica)",
+         "Ciclo único (últ. año)": "0 (no aplica)",
          "Rippl NASA POWER": f"Sí — {anios_nasa_n} años" if nasa_ok else "Sin datos",
          "Rippl WaPOR v3": f"Sí — {anios_wapor_n} años" if wapor_ok else "Sin datos",
          "Observación": "El ciclo único no verifica eventos extremos"},
         {"Dimensión evaluada": "Aval de no-vaciado",
-         "Ciclo único (P75%)": "Implícito (estadístico)",
+         "Ciclo único (últ. año)": "Explícito, pero solo sobre 1 año (Rippl)",
          "Rippl NASA POWER": "Explícito (operacional)" if df_sim_nasa is not None else "Pendiente simulación",
          "Rippl WaPOR v3": "Explícito (operacional)" if df_sim_wapor is not None else "Pendiente simulación",
          "Observación": "Ver Tabla 8 — episodios críticos identificados"},
         {"Dimensión evaluada": "Identificación décadas críticas",
-         "Ciclo único (P75%)": "No disponible",
+         "Ciclo único (últ. año)": "No disponible",
          "Rippl NASA POWER": "Sí (Tabla 8)" if df_sim_nasa is not None else "Pendiente",
          "Rippl WaPOR v3": "Sí (Tabla 8)" if df_sim_wapor is not None else "Pendiente",
          "Observación": "Permite anticipar manejo agronómico"},
         {"Dimensión evaluada": "Resolución espacial",
-         "Ciclo único (P75%)": "Puntual (estación/pixel)",
+         "Ciclo único (últ. año)": "Puntual (estación/pixel)",
          "Rippl NASA POWER": "~50 km (global)",
          "Rippl WaPOR v3": "30–250 m (África/MENA/Colombia)",
          "Observación": "NASA: extensión temporal. WaPOR: resolución espacial."},
         {"Dimensión evaluada": "Extensión temporal disponible",
-         "Ciclo único (P75%)": "Según estación o API",
+         "Ciclo único (últ. año)": "1 año (último disponible)",
          "Rippl NASA POWER": f"{anios_nasa_n} años (desde 1981)" if nasa_ok else "Sin datos",
          "Rippl WaPOR v3": f"{anios_wapor_n} años (cobertura útil desde 2018)" if wapor_ok else "Sin datos",
          "Observación": "NASA recomendada para análisis OMM (≥30 años)"},
         {"Dimensión evaluada": "Trazabilidad documental",
-         "Ciclo único (P75%)": "Limitada",
+         "Ciclo único (últ. año)": "Limitada",
          "Rippl NASA POWER": "Alta (código abierto)",
          "Rippl WaPOR v3": "Alta (código abierto)",
          "Observación": "Reproducible y auditable"},
@@ -3441,6 +3662,101 @@ with tab4:
     st.divider()
 
     # ─────────────────────────────────────────────────────────────────────
+    # SECCIÓN D.1 — TENDENCIA ANUAL DE PRECIPITACIÓN Y RET (NASA vs WaPOR)
+    # Diagnóstico visual para identificar si el RET (evapotranspiración de
+    # referencia) muestra una tendencia creciente que explique caídas del
+    # volumen no atribuibles a déficit de precipitación (p. ej. 2022).
+    # Se usan subgráficas (small multiples) por fuente para evitar saturar
+    # una sola gráfica con series de longitud muy distinta (NASA: serie
+    # larga; WaPOR: serie corta de alta resolución).
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("🌡️ Tendencia Anual de Precipitación y RET — NASA vs WaPOR")
+    st.caption(
+        "Cada fuente se agrega a totales **anuales** (en vez de decadales) y se muestra en su propio panel, "
+        "con línea de tendencia (regresión lineal) para evidenciar si la evapotranspiración de referencia "
+        "(RET) viene en aumento frente a la precipitación."
+    )
+
+    df_nasa_anual_tend, df_wapor_anual_tend = None, None
+    if df_nasa_base is not None and {'Precipitacion', 'RET', 'Año'}.issubset(df_nasa_base.columns):
+        df_nasa_anual_tend = df_nasa_base.groupby('Año')[['Precipitacion', 'RET']].sum().reset_index()
+    if df_wapor_base is not None and {'Precipitacion', 'RET', 'Año'}.issubset(df_wapor_base.columns):
+        df_wapor_anual_tend = df_wapor_base.groupby('Año')[['Precipitacion', 'RET']].sum().reset_index()
+
+    fuentes_tend = [(d, n) for d, n in
+                     [(df_nasa_anual_tend, "NASA POWER"), (df_wapor_anual_tend, "WaPOR v3")]
+                     if d is not None and len(d) >= 2]
+
+    if fuentes_tend:
+        from plotly.subplots import make_subplots
+
+        n_filas_tend = len(fuentes_tend)
+        fig_tend = make_subplots(
+            rows=n_filas_tend, cols=1,
+            subplot_titles=[f"{nombre} — Precipitación y RET anual" for _, nombre in fuentes_tend],
+            specs=[[{"secondary_y": True}] for _ in range(n_filas_tend)],
+            vertical_spacing=0.16
+        )
+
+        for i_tend, (df_anual_f, nombre_f) in enumerate(fuentes_tend, start=1):
+            anios_f  = df_anual_f['Año'].values
+            p_f      = df_anual_f['Precipitacion'].values
+            ret_f    = df_anual_f['RET'].values
+
+            fig_tend.add_trace(
+                go.Bar(x=anios_f, y=p_f, name='Precipitación anual (mm)',
+                       marker_color='#0b3d91', opacity=0.75, showlegend=(i_tend == 1)),
+                row=i_tend, col=1, secondary_y=False
+            )
+            fig_tend.add_trace(
+                go.Scatter(x=anios_f, y=ret_f, name='RET anual (mm)', mode='lines+markers',
+                           line=dict(color='#c0392b', width=2), showlegend=(i_tend == 1)),
+                row=i_tend, col=1, secondary_y=True
+            )
+
+            if len(anios_f) >= 3:
+                coef_p_tend = np.polyfit(anios_f, p_f, 1)
+                coef_ret_tend = np.polyfit(anios_f, ret_f, 1)
+                fig_tend.add_trace(
+                    go.Scatter(x=anios_f, y=np.polyval(coef_p_tend, anios_f), name='Tendencia P',
+                               mode='lines', line=dict(color='#0b3d91', width=2, dash='dash'),
+                               showlegend=(i_tend == 1)),
+                    row=i_tend, col=1, secondary_y=False
+                )
+                fig_tend.add_trace(
+                    go.Scatter(x=anios_f, y=np.polyval(coef_ret_tend, anios_f), name='Tendencia RET',
+                               mode='lines', line=dict(color='#c0392b', width=2, dash='dash'),
+                               showlegend=(i_tend == 1)),
+                    row=i_tend, col=1, secondary_y=True
+                )
+                st.caption(
+                    f"📐 **{nombre_f}** — pendiente Precipitación: {coef_p_tend[0]:+.1f} mm/año · "
+                    f"pendiente RET: {coef_ret_tend[0]:+.1f} mm/año"
+                )
+
+            fig_tend.update_yaxes(title_text="Precipitación (mm/año)", row=i_tend, col=1, secondary_y=False)
+            fig_tend.update_yaxes(title_text="RET (mm/año)", row=i_tend, col=1, secondary_y=True)
+            fig_tend.update_xaxes(title_text="Año", row=i_tend, col=1)
+
+        fig_tend.update_layout(
+            height=380 * n_filas_tend,
+            legend=dict(orientation='h', yanchor='bottom', y=1.08),
+            plot_bgcolor='white',
+            barmode='group'
+        )
+        st.plotly_chart(fig_tend, use_container_width=True)
+        st.caption(
+            "🔵 Barras = precipitación anual acumulada. 🔴 Línea = RET anual acumulada. Líneas punteadas = "
+            "tendencia lineal de cada variable (regresión). Una pendiente RET positiva y creciente frente a P "
+            "estable o positiva sugiere que la caída de volumen en un año dado responde a mayor demanda "
+            "evaporativa, no a déficit de lluvia."
+        )
+    else:
+        st.info("Ejecute la Pestaña 1/2 con NASA y/o WaPOR (mínimo 2 años) para visualizar la tendencia de precipitación y RET.")
+
+    st.divider()
+
+    # ─────────────────────────────────────────────────────────────────────
     # SECCIÓN E: DATOS DEL PROYECTO + GENERACIÓN DE MEMORIAS WORD
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("📄 Generación de Memorias de Cálculo (Anexo 3, 6 y 7)")
@@ -3493,6 +3809,23 @@ with tab4:
             df_bat_anx3       = st.session_state.get('df_batimetria_val', None)
             tipo_alm_anx3     = st.session_state.get('tipo_almacenamiento_elegido', "Tanque Australiano")
 
+            # Datos para Resumen Predio
+            fuente_nasa  = st.session_state.get('fuente_nasa_lista',  False)
+            fuente_wapor = st.session_state.get('fuente_wapor_lista', False)
+            if fuente_nasa and fuente_wapor:
+                fuente_anx3 = "NASA POWER y WaPOR v3"
+            elif fuente_wapor:
+                fuente_anx3 = "WaPOR v3"
+            elif fuente_nasa:
+                fuente_anx3 = "NASA POWER"
+            else:
+                fuente_anx3 = "N/D"
+
+            anios_nasa_anx3  = st.session_state.get('anios_nasa',  0)
+            anios_wapor_anx3 = st.session_state.get('anios_wapor', 0)
+            num_anios_anx3   = max(anios_nasa_anx3, anios_wapor_anx3)
+            num_sect_anx3    = int(st.session_state.get('num_sect', 1))
+
             if df_sim_anx3 is None:
                 st.error("⚠️ Ejecuta primero la simulación en la Pestaña 3 antes de generar este documento.")
             else:
@@ -3526,6 +3859,9 @@ with tab4:
                         imagen_area_volumen_bytes=imagen_av_anx3,
                         imagen_esquema_bytes=imagen_esq_anx3,
                         area_cultivo_ha=area_cult_anx3,
+                        fuente_datos=fuente_anx3,
+                        num_anios_serie=num_anios_anx3,
+                        num_sectores=num_sect_anx3,
                     )
                 buffer_anx3 = io.BytesIO()
                 doc_anx3.save(buffer_anx3)
@@ -3545,7 +3881,31 @@ with tab4:
         st.caption("Balance hídrico, ETc decadal, requerimiento neto y bruto, análisis oferta-demanda.")
 
         if st.button("⚙️ Generar Anexo 6", type="primary", key="btn_anx6"):
-            doc_anx6 = crear_memoria_demandas(None)
+            df_bal_anx6 = st.session_state.get('df_balance_t2', None)
+            kc_mid_anx6 = st.session_state.get('kc_m', None)
+            ef_anx6     = st.session_state.get('t2_ef_total_calc', None)
+            area_anx6   = st.session_state.get('area_total_ha', None)
+            etc_max_anx6 = None
+            if df_bal_anx6 is not None and 'ETc_mm' in df_bal_anx6.columns:
+                etc_max_anx6 = float(df_bal_anx6['ETc_mm'].max())
+
+            if df_bal_anx6 is None:
+                st.warning("⚠️ Ejecuta la Pestaña 2 (Balance Hídrico) para poblar el anexo con resultados. Se generará la versión metodológica.")
+
+            with st.spinner("Generando Anexo 6..."):
+                doc_anx6 = gax.crear_memoria_demandas(
+                    df_balance=df_bal_anx6,
+                    cultivo=cultivo_anx,
+                    tipo_riego=tipo_riego_anx,
+                    kc_mid=kc_mid_anx6,
+                    ef_global=ef_anx6,
+                    area_ha=area_anx6,
+                    etc_max=etc_max_anx6,
+                    nombre_proyecto=nombre_proyecto_inp,
+                    municipio=municipio_inp,
+                    departamento=departamento_inp,
+                    id_predios=id_predio_inp,
+                )
             buffer_anx6 = io.BytesIO()
             doc_anx6.save(buffer_anx6)
             st.success("✅ Anexo 6 generado.")
@@ -3557,14 +3917,202 @@ with tab4:
                 key="dl_anx6"
             )
 
-    # ANEXO 7
+    # ANEXO 7 (Word)
     with col_anx7:
         st.markdown("### 📙 Anexo 7")
         st.markdown("**Memoria de Cálculo de Riego**")
         st.caption("Diseño agronómico e hidráulico (goteo o aspersión), caudales de diseño y eficiencias.")
 
-        if st.button("⚙️ Generar Anexo 7", type="primary", key="btn_anx7"):
-            st.info("🔧 El Anexo 7 está en desarrollo. Se implementará en la siguiente versión.")
+        if st.button("⚙️ Generar Anexo 7 (Word)", type="primary", key="btn_anx7"):
+            q_dec_anx7 = st.session_state.get('q_diseno_decadal', None)
+            q_max_anx7 = None
+            if q_dec_anx7 is not None:
+                try:
+                    q_max_anx7 = float(np.max(q_dec_anx7))
+                except Exception:
+                    q_max_anx7 = None
+            with st.spinner("Generando Anexo 7 (Word)..."):
+                doc_anx7 = gax.crear_anexo_7(
+                    tipo_riego=tipo_riego_anx,
+                    cultivo=cultivo_anx,
+                    area_ha=st.session_state.get('area_total_ha', None),
+                    q_diseno_lps=q_max_anx7,
+                    ef_global=st.session_state.get('t2_ef_total_calc', None),
+                    nombre_proyecto=nombre_proyecto_inp,
+                    municipio=municipio_inp,
+                    departamento=departamento_inp,
+                    id_predios=id_predio_inp,
+                    num_sectores=int(st.session_state.get('num_sect', 1)),
+                )
+            buffer_anx7 = io.BytesIO()
+            doc_anx7.save(buffer_anx7)
+            st.success("✅ Anexo 7 (Word) generado.")
+            st.download_button(
+                label="📥 Descargar Anexo 7 (.docx)",
+                data=buffer_anx7.getvalue(),
+                file_name="Anexo_7_Memoria_Riego_ADR.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="dl_anx7"
+            )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # ANEXO 3a — CONSOLIDADO DE DATOS CRUDOS
+    # ─────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📘 Anexo 3a — Consolidación de Datos Climáticos Crudos")
+    st.caption(
+        "Reúne las series diarias crudas (precipitación, evaporación y RET) cargadas en "
+        "la Pestaña 1 y procesadas en la Pestaña 2, con una gráfica decadal suavizada de "
+        "las tres variables por fuente. Facilita la revisión trazable de los datos fuente."
+    )
+    col_3a_l, col_3a_r = st.columns([1, 2])
+    with col_3a_l:
+        max_filas_3a = st.number_input(
+            "Filas de la serie diaria a incluir (por fuente)",
+            min_value=50, max_value=5000, value=400, step=50, key="max_filas_3a",
+            help="La serie diaria completa puede tener miles de filas; se trunca en el Word "
+                 "para mantenerlo legible. El CSV completo sigue disponible en la Pestaña 1."
+        )
+    with col_3a_r:
+        if st.button("⚙️ Generar Anexo 3a", type="primary", key="btn_anx3a"):
+            df_base_nasa_3a  = st.session_state.get('df_base_nasa', None)
+            df_dec_nasa_3a   = st.session_state.get('df_decadal_nasa', None)
+            df_base_wapor_3a = st.session_state.get('df_base_wapor', None)
+            df_dec_wapor_3a  = st.session_state.get('df_decadal_wapor', None)
+
+            if df_base_nasa_3a is None and df_base_wapor_3a is None:
+                st.error("⚠️ No hay series climáticas cargadas. Ejecuta la Pestaña 1 (NASA POWER o WaPOR v3) primero.")
+            else:
+                with st.spinner("Generando Anexo 3a..."):
+                    doc_3a = gax.crear_anexo_3a(
+                        df_base_nasa=df_base_nasa_3a,
+                        df_decadal_nasa=df_dec_nasa_3a,
+                        df_base_wapor=df_base_wapor_3a,
+                        df_decadal_wapor=df_dec_wapor_3a,
+                        lat=lat_anx, lon=lon_anx,
+                        cultivo=cultivo_anx,
+                        nombre_proyecto=nombre_proyecto_inp,
+                        municipio=municipio_inp,
+                        departamento=departamento_inp,
+                        max_filas_diarias=int(max_filas_3a),
+                    )
+                buffer_3a = io.BytesIO()
+                doc_3a.save(buffer_3a)
+                st.success("✅ Anexo 3a generado.")
+                st.download_button(
+                    label="📥 Descargar Anexo 3a (.docx)",
+                    data=buffer_3a.getvalue(),
+                    file_name="Anexo_3a_Datos_Climaticos_Crudos_ADR.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key="dl_anx3a"
+                )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # ANEXO 7a — HOJA DE CÁLCULO HIDRÁULICO (Excel) con inputs previos
+    # ─────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📗 Anexo 7a — Hoja de Cálculo Hidráulico (Excel)")
+    st.caption(
+        "Genera el libro Excel con el cálculo hidráulico funcional por etapas "
+        "(Hazen-Williams en conducción, Darcy-Weisbach en múltiple y lateral críticos). "
+        "Complete las entradas de diseño; los valores marcados en amarillo son editables "
+        "en el propio Excel tras la descarga."
+    )
+
+    _es_goteo_ui = "gote" in str(tipo_riego_anx).lower()
+    with st.expander("📝 Entradas de diseño del Anexo 7a", expanded=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            in_area_sector = st.number_input(
+                "Área por sector (ha)", min_value=0.001,
+                value=float(st.session_state.get('area_total_ha', 0.05) or 0.05),
+                step=0.01, format="%.3f", key="7a_area_sector")
+            in_nsect = st.number_input("N.º de sectores", min_value=1,
+                value=int(st.session_state.get('num_sect', 1)), step=1, key="7a_nsect")
+            in_valv = st.number_input("Válvulas funcionando a la vez", min_value=1,
+                value=1, step=1, key="7a_valv")
+            in_ef = st.number_input(
+                "Eficiencia de riego", min_value=0.1, max_value=1.0,
+                value=float(st.session_state.get('t2_ef_total_calc', 0.90 if _es_goteo_ui else 0.85) or 0.90),
+                step=0.01, format="%.2f", key="7a_ef")
+            in_kc = st.number_input("Coeficiente Kc", min_value=0.1, max_value=1.5,
+                value=float(st.session_state.get('kc_m', 1.10) or 1.10), step=0.05,
+                format="%.2f", key="7a_kc")
+        with c2:
+            _eto_def = 5.0
+            _dfb = st.session_state.get('df_balance_t2', None)
+            if _dfb is not None and 'RET' in _dfb.columns:
+                try: _eto_def = float(_dfb['RET'].max())
+                except Exception: _eto_def = 5.0
+            in_eto = st.number_input("ETo máxima (mm/día)", min_value=0.5,
+                value=round(_eto_def, 2), step=0.1, format="%.2f", key="7a_eto")
+            in_sep_e = st.number_input("Separación emisores (m)", min_value=0.05,
+                value=0.5 if _es_goteo_ui else 6.6, step=0.1, format="%.2f", key="7a_sepe")
+            in_sep_l = st.number_input("Separación laterales (m)", min_value=0.05,
+                value=3.0 if _es_goteo_ui else 6.6, step=0.1, format="%.2f", key="7a_sepl")
+            in_q_emisor = st.number_input("Caudal del emisor (l/h)", min_value=0.1,
+                value=4.0 if _es_goteo_ui else 170.1, step=0.1, format="%.1f", key="7a_qemi")
+            in_p_emisor = st.number_input("Presión trabajo emisor (m.c.a.)", min_value=1.0,
+                value=10.0 if _es_goteo_ui else 14.0, step=1.0, format="%.1f", key="7a_pemi")
+        with c3:
+            in_diam_hum = st.number_input("Diámetro humedecido (m)", min_value=0.1,
+                value=0.8 if _es_goteo_ui else 13.2, step=0.1, format="%.1f", key="7a_dhum")
+            in_jornada = st.number_input("Jornada de operación (h/día)", min_value=1,
+                value=int(st.session_state.get('t_max_val', 8) or 8), step=1, key="7a_jorn")
+            in_p_toma = st.number_input("Presión disponible en toma (m.c.a.)", min_value=1.0,
+                value=40.0, step=1.0, format="%.1f", key="7a_ptoma")
+
+        st.markdown("**Tramos de conducción** (nodo → nodo, longitud y cotas)")
+        cc1, cc2, cc3, cc4, cc5 = st.columns(5)
+        with cc1:
+            t1_long = st.number_input("T1 Long (m) Caseta→Filtro", value=1.0, step=1.0, key="7a_t1l")
+            t2_long = st.number_input("T2 Long (m) Filtro→Válvula", value=40.0, step=1.0, key="7a_t2l")
+        with cc2:
+            t1_ci = st.number_input("T1 Cota ini", value=2698.8, step=0.1, format="%.1f", key="7a_t1ci")
+            t2_ci = st.number_input("T2 Cota ini", value=2698.8, step=0.1, format="%.1f", key="7a_t2ci")
+        with cc3:
+            t1_cf = st.number_input("T1 Cota fin", value=2698.8, step=0.1, format="%.1f", key="7a_t1cf")
+            t2_cf = st.number_input("T2 Cota fin", value=2702.5, step=0.1, format="%.1f", key="7a_t2cf")
+        with cc4:
+            m_long = st.number_input("Múltiple Long (m)", value=13.2, step=0.1, format="%.1f", key="7a_ml")
+            m_cf   = st.number_input("Múltiple Cota fin", value=2704.2, step=0.1, format="%.1f", key="7a_mcf")
+        with cc5:
+            l_long = st.number_input("Lateral Long (m)", value=6.1, step=0.1, format="%.1f", key="7a_ll")
+            l_cf   = st.number_input("Lateral Cota fin", value=2705.0, step=0.1, format="%.1f", key="7a_lcf")
+
+    if st.button("⚙️ Generar Anexo 7a (Excel)", type="primary", key="btn_anx7a"):
+        inputs_7a = {
+            "departamento": departamento_inp, "municipio": municipio_inp,
+            "cultivo": cultivo_anx, "tipo_riego": tipo_riego_anx,
+            "area_sector_ha": float(in_area_sector), "num_sectores": int(in_nsect),
+            "valvulas_simultaneas": int(in_valv), "eficiencia": float(in_ef),
+            "eto_max": float(in_eto), "kc": float(in_kc),
+            "sep_emisores": float(in_sep_e), "sep_laterales": float(in_sep_l),
+            "caudal_emisor_lph": float(in_q_emisor),
+            "presion_trabajo_emisor": float(in_p_emisor),
+            "diam_humedecido": float(in_diam_hum), "jornada_h": int(in_jornada),
+            "presion_disponible_toma": float(in_p_toma),
+            "tramos_conduccion": [
+                {"nodo_ini": "Caseta", "nodo_fin": "Filtro", "longitud": float(t1_long),
+                 "cota_ini": float(t1_ci), "cota_fin": float(t1_cf)},
+                {"nodo_ini": "Filtro", "nodo_fin": "Válvula", "longitud": float(t2_long),
+                 "cota_ini": float(t2_ci), "cota_fin": float(t2_cf)},
+            ],
+            "long_multiple": float(m_long), "cota_ini_mult": float(t2_cf),
+            "cota_fin_mult": float(m_cf),
+            "long_lateral": float(l_long), "cota_ini_lat": float(m_cf),
+            "cota_fin_lat": float(l_cf),
+        }
+        with st.spinner("Generando Anexo 7a (Excel)..."):
+            buf_7a = gax.crear_anexo_7a_excel(inputs_7a)
+        st.success("✅ Anexo 7a (Excel) generado. Ábralo y recalcule (F9) si su visor no lo hace automáticamente.")
+        st.download_button(
+            label="📥 Descargar Anexo 7a (.xlsx)",
+            data=buf_7a.getvalue(),
+            file_name="Anexo_7a_Calculo_Hidraulico_ADR.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_anx7a"
+        )
 
     # ─────────────────────────────────────────────────────────────────────
     # SECCIÓN F: INSTRUCCIONES CONFIG STREAMLIT para ZIP grandes
