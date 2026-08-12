@@ -159,6 +159,141 @@ def agregar_decadas(df_base_diario):
     df['Decada_Año'] = (df['Mes'] - 1) * 3 + df['Decada_Mes']
     return df
 
+# =====================================================================
+# CATÁLOGO ENSO Y UTILIDADES DE ANÁLISIS INDEPENDIENTE POR FUENTE
+# ---------------------------------------------------------------------
+# Los episodios ENSO se declaran una sola vez y la cobertura se calcula
+# DINÁMICAMENTE a partir de los años realmente procesados en cada serie
+# (NASA POWER o WaPOR v3), en lugar de textos fijos escritos a mano.
+# Fuente de los episodios: índice ONI (NOAA/CPC) — clasificación por
+# intensidad según el máximo trimestral del ONI.
+# =====================================================================
+
+EPISODIOS_ENSO = [
+    # (nombre, año_inicio, año_fin, fase, intensidad)
+    ("El Niño 1997-98", 1997, 1998, "El Niño", "Muy fuerte"),
+    ("La Niña 1998-2000", 1998, 2000, "La Niña", "Fuerte"),
+    ("El Niño 2002-03", 2002, 2003, "El Niño", "Moderado"),
+    ("El Niño 2004-05", 2004, 2005, "El Niño", "Débil"),
+    ("La Niña 2007-08", 2007, 2008, "La Niña", "Fuerte"),
+    ("El Niño 2009-10", 2009, 2010, "El Niño", "Moderado-Fuerte"),
+    ("La Niña 2010-11", 2010, 2011, "La Niña", "Fuerte"),
+    ("El Niño 2015-16", 2015, 2016, "El Niño", "Muy fuerte"),
+    ("La Niña 2020-23", 2020, 2023, "La Niña", "Moderada (triple-dip)"),
+    ("El Niño 2023-24", 2023, 2024, "El Niño", "Fuerte"),
+]
+
+INTENSIDADES_CRITICAS = {"Moderado", "Moderado-Fuerte", "Fuerte", "Muy fuerte"}
+
+
+def enso_cobertura(anios_serie, solo_el_nino=True, solo_criticos=True):
+    """Determina qué episodios ENSO quedan cubiertos por una serie climática.
+
+    Parámetros
+    ----------
+    anios_serie : iterable de años (int) realmente presentes en la serie.
+    solo_el_nino : si True, solo considera episodios cálidos (El Nino), que son
+        los determinantes para el dimensionamiento del reservorio (déficit).
+    solo_criticos : si True, descarta episodios de intensidad débil.
+
+    Retorna
+    -------
+    (completos, parciales) : dos listas de nombres de episodios. Un episodio es
+    'completo' cuando TODOS sus años están presentes en la serie; es 'parcial'
+    cuando solo algunos de sus años están presentes.
+    """
+    try:
+        anios = set(int(a) for a in anios_serie)
+    except Exception:
+        anios = set()
+    if not anios:
+        return [], []
+
+    completos, parciales = [], []
+    for nombre, y0, y1, fase, intensidad in EPISODIOS_ENSO:
+        if solo_el_nino and fase != "El Niño":
+            continue
+        if solo_criticos and intensidad not in INTENSIDADES_CRITICAS:
+            continue
+        anios_ev = set(range(y0, y1 + 1))
+        etiqueta = "%s (%s)" % (nombre, intensidad)
+        if anios_ev.issubset(anios):
+            completos.append(etiqueta)
+        elif anios_ev & anios:
+            parciales.append(etiqueta)
+    return completos, parciales
+
+
+def enso_texto(anios_serie, solo_el_nino=True, solo_criticos=True):
+    """Texto compacto y auditable de cobertura ENSO para tablas."""
+    completos, parciales = enso_cobertura(anios_serie, solo_el_nino, solo_criticos)
+    partes = []
+    if completos:
+        partes.append("%d completo(s): %s" % (len(completos), "; ".join(completos)))
+    if parciales:
+        partes.append("parcial(es): %s" % "; ".join(parciales))
+    if not partes:
+        return "0 (ningún episodio ENSO con cobertura en la ventana)"
+    return " | ".join(partes)
+
+
+def enso_n_completos(anios_serie, solo_el_nino=True, solo_criticos=True):
+    completos, _ = enso_cobertura(anios_serie, solo_el_nino, solo_criticos)
+    return len(completos)
+
+
+def periodo_serie(anios_serie):
+    """Devuelve 'AAAA-AAAA' y el número de años únicos de la serie."""
+    try:
+        anios = sorted(set(int(a) for a in anios_serie))
+    except Exception:
+        anios = []
+    if not anios:
+        return "N/D", 0
+    if len(anios) == 1:
+        return str(anios[0]), 1
+    return "%d-%d" % (anios[0], anios[-1]), len(anios)
+
+
+def _tag_fuente(texto_fuente):
+    """Normaliza cualquier etiqueta de fuente a 'NASA' o 'WAPOR'."""
+    return "NASA" if "NASA" in str(texto_fuente).upper() else "WAPOR"
+
+
+def _nombre_fuente(tag):
+    return "NASA POWER" if tag == "NASA" else "WaPOR v3"
+
+
+def get_bundle_balance(tag):
+    """Bundle de balance hídrico (Pestaña 2) de la fuente indicada, o None."""
+    return st.session_state.get('balance_por_fuente', {}).get(tag, None)
+
+
+def set_bundle_balance(tag, bundle):
+    if 'balance_por_fuente' not in st.session_state:
+        st.session_state['balance_por_fuente'] = {}
+    st.session_state['balance_por_fuente'][tag] = bundle
+
+
+def get_snapshot_sim(tag):
+    """Snapshot inmutable de la simulación (Pestaña 3) de la fuente indicada."""
+    return st.session_state.get('sim_por_fuente', {}).get(tag, None)
+
+
+def set_snapshot_sim(tag, snapshot):
+    if 'sim_por_fuente' not in st.session_state:
+        st.session_state['sim_por_fuente'] = {}
+    st.session_state['sim_por_fuente'][tag] = snapshot
+
+
+def update_snapshot_sim(tag, **kwargs):
+    snap = get_snapshot_sim(tag)
+    if snap is None:
+        snap = {}
+    snap.update(kwargs)
+    set_snapshot_sim(tag, snap)
+
+
 def _agregar_parrafo_justificado(doc, texto, negrita=False, italica=False, tamanio=None):
     """Agrega un párrafo justificado con formato opcional."""
     p = doc.add_paragraph()
@@ -1391,17 +1526,65 @@ with tab1:
         st.session_state['df_promedio'] = df_promedio_decadal
         st.session_state['df_base_diario_tab1'] = df_base_diario.copy()
 
-        # --- MEMORIA SEPARADA POR FUENTE (NASA vs WaPOR) para Pestaña 4 ---
-        if 'NASA' in fuente_datos:
-            st.session_state['df_base_nasa']      = df_base_diario.copy()
-            st.session_state['df_decadal_nasa']   = df_promedio_decadal.copy()
+        # ─────────────────────────────────────────────────────────────────
+        # MEMORIA INDEPENDIENTE POR FUENTE (NASA vs WaPOR)
+        # Cada fuente conserva su PROPIA serie diaria, su propia serie
+        # decadal, su propio periodo y su propia lista de años. Cargar una
+        # fuente NUNCA sobrescribe ni contamina la otra: son dos análisis
+        # paralelos e independientes de principio a fin de la cadena
+        # (Pestaña 1 -> Pestaña 2 -> Pestaña 3 -> Pestaña 4).
+        # ─────────────────────────────────────────────────────────────────
+        _tag_t1 = 'NASA' if 'NASA' in fuente_datos else 'WAPOR'
+        _anios_t1 = sorted(df_base_diario['Año'].unique().tolist())
+        _periodo_t1, _n_anios_t1 = periodo_serie(_anios_t1)
+
+        if _tag_t1 == 'NASA':
+            st.session_state['df_base_nasa']       = df_base_diario.copy()
+            st.session_state['df_decadal_nasa']    = df_promedio_decadal.copy()
             st.session_state['fuente_nasa_lista']  = True
-            st.session_state['anios_nasa']         = int(df_base_diario['Año'].nunique())
+            st.session_state['anios_nasa']         = _n_anios_t1
+            st.session_state['lista_anios_nasa']   = _anios_t1
+            st.session_state['periodo_nasa']       = _periodo_t1
+            st.session_state['lat_nasa_serie']     = lat_input
+            st.session_state['lon_nasa_serie']     = lon_input
+            st.session_state['ts_carga_nasa']      = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
         else:
-            st.session_state['df_base_wapor']     = df_base_diario.copy()
-            st.session_state['df_decadal_wapor']  = df_promedio_decadal.copy()
+            st.session_state['df_base_wapor']      = df_base_diario.copy()
+            st.session_state['df_decadal_wapor']   = df_promedio_decadal.copy()
             st.session_state['fuente_wapor_lista'] = True
-            st.session_state['anios_wapor']        = int(df_base_diario['Año'].nunique())
+            st.session_state['anios_wapor']        = _n_anios_t1
+            st.session_state['lista_anios_wapor']  = _anios_t1
+            st.session_state['periodo_wapor']      = _periodo_t1
+            st.session_state['lat_wapor_serie']    = lat_input
+            st.session_state['lon_wapor_serie']    = lon_input
+            st.session_state['ts_carga_wapor']     = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
+
+        # ── Panel de estado independiente de ambas fuentes ──
+        st.divider()
+        st.subheader("🗂️ Estado de las series climáticas cargadas (análisis independiente)")
+        st.caption(
+            "Cada fuente se almacena y se analiza por separado. La serie que acaba de procesar "
+            "no modifica la otra: puede cargar NASA POWER y WaPOR v3 en cualquier orden y ambas "
+            "quedarán disponibles, con su propio periodo y su propia cobertura ENSO, para el "
+            "balance hídrico (Pestaña 2), la simulación (Pestaña 3) y la comparación (Pestaña 4)."
+        )
+        _c_est1, _c_est2 = st.columns(2)
+        for _col, _tag in [(_c_est1, 'NASA'), (_c_est2, 'WAPOR')]:
+            with _col:
+                _lista = st.session_state.get(
+                    'lista_anios_nasa' if _tag == 'NASA' else 'lista_anios_wapor', [])
+                _ok = st.session_state.get(
+                    'fuente_nasa_lista' if _tag == 'NASA' else 'fuente_wapor_lista', False)
+                _per = st.session_state.get(
+                    'periodo_nasa' if _tag == 'NASA' else 'periodo_wapor', 'N/D')
+                _ts = st.session_state.get(
+                    'ts_carga_nasa' if _tag == 'NASA' else 'ts_carga_wapor', '—')
+                if _ok and _lista:
+                    st.success("✅ **%s** — %d años procesados (%s)" % (_nombre_fuente(_tag), len(_lista), _per))
+                    st.caption("Cobertura ENSO (El Niño, intensidad ≥ moderada): %s" % enso_texto(_lista))
+                    st.caption("Última carga: %s" % _ts)
+                else:
+                    st.warning("⚠️ **%s** — sin datos cargados en esta sesión" % _nombre_fuente(_tag))
         
         # =====================================================================
         # TABLA DE REVISIÓN DE VALORES DIARIOS EXTRAÍDOS — solo para WaPOR
@@ -1649,11 +1832,33 @@ with tab2:
         # --- SECCIÓN 1: DATOS CLIMÁTICOS ---
         st.subheader("1. Ubicación y Periodo")
         fuente_clima_t2 = st.radio(
-            "Fuente climática para Pestaña 2:",
-            ["Usar datos procesados en Pestaña 1", "NASA POWER (API Online)"],
+            "Fuente climática para el balance hídrico (define la demanda de riego):",
+            ["NASA POWER (serie de Pestaña 1)",
+             "WaPOR v3 (serie de Pestaña 1)",
+             "NASA POWER (API Online)"],
             horizontal=True,
             key="fuente_clima_t2"
         )
+        st.caption(
+            "⚠️ **La demanda de riego se calcula con la RET de esta fuente.** Cada fuente genera "
+            "su propio balance, su propia curva de caudales de diseño y su propio df_chrono, que se "
+            "guardan por separado. La Pestaña 3 solo podrá simular con NASA si aquí se calculó el "
+            "balance con NASA, y solo podrá simular con WaPOR si aquí se calculó con WaPOR: así se "
+            "elimina el cruce que hacía que el V* de una fuente se recalculara con el clima de la otra."
+        )
+
+        # Estado de los balances ya calculados por fuente
+        _bal_estado = st.session_state.get('balance_por_fuente', {})
+        _cb1, _cb2 = st.columns(2)
+        for _colb, _tagb in [(_cb1, 'NASA'), (_cb2, 'WAPOR')]:
+            with _colb:
+                _bb = _bal_estado.get(_tagb)
+                if _bb:
+                    st.success("✅ Balance %s listo — %d años (%s) | Ef. global %.2f | %s" % (
+                        _nombre_fuente(_tagb), _bb.get('n_anios', 0), _bb.get('periodo', 'N/D'),
+                        _bb.get('ef_total', 0.0), _bb.get('tipo_riego', '—')))
+                else:
+                    st.info("ℹ️ Balance %s: pendiente de cálculo" % _nombre_fuente(_tagb))
 
         # Leer coordenadas y fechas ejecutadas en Pestaña 1 (si existen)
         _lat_def  = float(st.session_state.get('latitud',   8.848795))
@@ -1833,12 +2038,29 @@ with tab2:
 
             # 1. Obtener datos climáticos según la fuente elegida
             df_clima_t2 = None
-            if fuente_clima_t2 == "Usar datos procesados en Pestaña 1":
-                df_clima_t2 = st.session_state.get('df_base_diario_tab1', None)
+            if fuente_clima_t2 == "NASA POWER (serie de Pestaña 1)":
+                fuente_bal_tag = 'NASA'
+                df_clima_t2 = st.session_state.get('df_base_nasa', None)
                 if df_clima_t2 is None:
-                    st.error("⚠️ No hay datos de la Pestaña 1. Ejecuta primero el análisis climático allí.")
+                    st.error(
+                        "⚠️ No hay serie NASA POWER cargada en la Pestaña 1. Ejecute allí el análisis "
+                        "con fuente NASA POWER, o seleccione aquí 'NASA POWER (API Online)'."
+                    )
                     st.stop()
+                df_clima_t2 = df_clima_t2.copy()
+            elif fuente_clima_t2 == "WaPOR v3 (serie de Pestaña 1)":
+                fuente_bal_tag = 'WAPOR'
+                df_clima_t2 = st.session_state.get('df_base_wapor', None)
+                if df_clima_t2 is None:
+                    st.error(
+                        "⚠️ No hay serie WaPOR v3 cargada en la Pestaña 1. Ejecute allí el análisis "
+                        "con fuente WaPOR v3 (archivos raster .ZIP) antes de calcular este balance."
+                    )
+                    st.stop()
+                df_clima_t2 = df_clima_t2.copy()
             else:
+                fuente_bal_tag = 'NASA'
+
                 # NASA POWER directo desde Tab 2 — usa el mismo kRS que eligió en Tab 1
                 try:
                     with st.spinner("Descargando datos de NASA POWER..."):
@@ -1969,6 +2191,39 @@ with tab2:
 
                 # 8. Guardar en session_state para Pestaña 3 y Anexo 3
                 t_max_horas = 12  # valor por defecto; ajustar si hay input de horas de riego
+
+                # ── 8.a BUNDLE INDEPENDIENTE POR FUENTE ──
+                # Todo lo que define la demanda de riego (df_chrono, caudales de
+                # diseño, eficiencia, área, tipo de riego) queda encapsulado en un
+                # bundle propio de la fuente climática empleada. La Pestaña 3 lee
+                # EXCLUSIVAMENTE el bundle de la fuente que se vaya a simular, de
+                # modo que el V* de NASA jamás se calcula con la RET de WaPOR ni
+                # viceversa.
+                _anios_bal = sorted(df_chrono['Año'].unique().tolist())
+                _periodo_bal, _n_anios_bal = periodo_serie(_anios_bal)
+                set_bundle_balance(fuente_bal_tag, {
+                    'df_chrono':            df_chrono.copy(),
+                    'df_balance':           df_balance.copy(),
+                    'q_diseno':             np.array(q_diseno, dtype=float).copy(),
+                    'q_diseno_goteo':       np.array(q_diseno_goteo, dtype=float).copy(),
+                    'q_diseno_aspersion':   np.array(q_diseno_aspersion, dtype=float).copy(),
+                    'ef_total':             ef_total,
+                    'area_total_ha':        area_total,
+                    'num_sectores':         int(num_sectores),
+                    'tipo_riego':           tipo_riego,
+                    'cultivo':              cultivo_seleccionado,
+                    't_max':                t_max_horas,
+                    'n_anios':              _n_anios_bal,
+                    'lista_anios':          _anios_bal,
+                    'periodo':              _periodo_bal,
+                    'fuente':               _nombre_fuente(fuente_bal_tag),
+                    'timestamp':            pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
+                })
+
+                # ── 8.b Claves legacy (compatibilidad con anexos Word) ──
+                # Reflejan la ÚLTIMA fuente calculada; la Pestaña 3 las reescribe
+                # con la fuente que efectivamente se simule.
+                st.session_state['fuente_balance_activa'] = fuente_bal_tag
                 st.session_state['df_chrono']          = df_chrono
                 st.session_state['q_diseno_decadal']   = q_diseno
                 st.session_state['q_diseno_decadal_goteo']      = q_diseno_goteo
@@ -1980,7 +2235,11 @@ with tab2:
                 st.session_state['tipo_riego_calc']      = tipo_riego
                 st.session_state['cultivo_calc']         = cultivo_seleccionado
 
-            st.success("✅ Balance hídrico calculado correctamente. Puedes continuar en la Pestaña 3.")
+            st.success(
+                "✅ Balance hídrico de **%s** calculado correctamente (%s, %d años). "
+                "Ya puede simular esta fuente en la Pestaña 3." % (
+                    _nombre_fuente(fuente_bal_tag), _periodo_bal, _n_anios_bal)
+            )
 
             # --- VISUALIZACIÓN DE RESULTADOS ---
             st.subheader("📊 Resumen del Balance Hídrico Decadal")
@@ -2049,19 +2308,22 @@ with tab3:
     wapor_disponible = st.session_state.get('fuente_wapor_lista', False)
 
     col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        if nasa_disponible:
-            st.success(f"✅ NASA POWER: {st.session_state.get('anios_nasa', '?')} años disponibles")
-        else:
-            st.warning("⚠️ NASA POWER: sin datos — ejecute Pestaña 1 con fuente NASA primero")
-    with col_s2:
-        if wapor_disponible:
-            st.success(f"✅ WaPOR v3: {st.session_state.get('anios_wapor', '?')} años disponibles")
-        else:
-            st.warning("⚠️ WaPOR v3: sin datos — ejecute Pestaña 1 con fuente WaPOR primero")
+    for _cols3, _tag3, _dispo3 in [(col_s1, 'NASA', nasa_disponible), (col_s2, 'WAPOR', wapor_disponible)]:
+        with _cols3:
+            _bal3 = get_bundle_balance(_tag3)
+            if _dispo3 and _bal3 is not None:
+                st.success("✅ %s: %d años (%s) — clima y balance propios listos" % (
+                    _nombre_fuente(_tag3), _bal3.get('n_anios', 0), _bal3.get('periodo', 'N/D')))
+            elif _dispo3:
+                st.warning("⚠️ %s: serie cargada, pero **sin balance propio**. Vaya a la Pestaña 2, "
+                           "seleccione esta fuente y calcule el balance." % _nombre_fuente(_tag3))
+            else:
+                st.warning("⚠️ %s: sin datos — ejecute la Pestaña 1 con esta fuente primero"
+                           % _nombre_fuente(_tag3))
 
-    # Seleccionar el df_chrono y q_diseno correspondiente a la fuente elegida
-    # (df_chrono viene de Pestaña 2, que usa df_base_diario_tab1; acá remapeamos si el usuario cambió de fuente)
+    # Selección de la fuente a simular. El df_chrono y los caudales de diseño
+    # se toman del bundle de balance de ESTA fuente (Pestaña 2), no de la última
+    # fuente cargada: cada fuente conserva su propia demanda y su propio V*.
     usar_nasa_sim  = "NASA" in fuente_sim_t3
     usar_wapor_sim = "WaPOR" in fuente_sim_t3
 
@@ -2105,7 +2367,26 @@ with tab3:
                 st.session_state['v_rippl_optimo']           = datos_guardados.get('v_rippl', None)
                 st.session_state['volumen_maximo_sistema']   = datos_guardados.get('v_max', 0)
                 fuente_activa = datos_guardados.get('fuente', '')
-                if 'NASA' in fuente_activa:
+                _tag_hist = _tag_fuente(fuente_activa)
+                _anios_hist = datos_guardados.get('lista_anios', [])
+                _periodo_hist, _n_hist = periodo_serie(_anios_hist)
+                set_snapshot_sim(_tag_hist, {
+                    'fuente':         _nombre_fuente(_tag_hist),
+                    'df_sim':         datos_guardados['df_sim'].copy(),
+                    'lista_anios':    _anios_hist,
+                    'n_anios':        _n_hist or datos_guardados.get('n_anios', 0),
+                    'periodo':        _periodo_hist,
+                    'v_max':          datos_guardados.get('v_max', 0),
+                    'tipo_riego':     datos_guardados.get('tipo_riego', '—'),
+                    'ef_total':       datos_guardados.get('eficiencia_global', None),
+                    'area_total_ha':  datos_guardados.get('area_total_ha', None),
+                    'tipo_almacenamiento': datos_guardados.get('tipo_almacenamiento', None),
+                    'v_rippl':        datos_guardados.get('v_rippl', None),
+                    'v_rippl_ultimo': datos_guardados.get('v_rippl_ultimo', None),
+                    'anio_ultimo':    datos_guardados.get('anio_ultimo', None),
+                    'timestamp':      datos_guardados.get('timestamp', ''),
+                })
+                if _tag_hist == 'NASA':
                     st.session_state['df_simulacion_nasa']   = datos_guardados['df_sim'].copy()
                     st.session_state['v_rippl_nasa']         = datos_guardados.get('v_rippl', None)
                 else:
@@ -2309,43 +2590,53 @@ with tab3:
             st.error("⚠️ No hay datos WaPOR v3 cargados. Ejecute Pestaña 1 con fuente WaPOR primero.")
             st.stop()
 
-        if 'df_chrono' not in st.session_state or 'q_diseno_decadal' not in st.session_state:
-            st.warning("⚠️ Por favor, ejecuta primero el cálculo en la 'Pestaña 2' para generar las matrices de demanda.")
+        # ─────────────────────────────────────────────────────────────────
+        # AISLAMIENTO ESTRICTO POR FUENTE
+        # La simulación se ejecuta ÚNICAMENTE con el bundle de balance de la
+        # fuente seleccionada: su propia serie decadal (P, E, RET), su propia
+        # curva de caudales de diseño (derivada de SU RET) y su propia
+        # eficiencia. Si el balance de esa fuente no existe, la simulación se
+        # detiene en vez de tomar prestada la demanda de la otra fuente, que
+        # era la causa de que el V* de NASA se alterara al correr WaPOR.
+        # ─────────────────────────────────────────────────────────────────
+        _tag_sim = 'NASA' if usar_nasa_sim else 'WAPOR'
+        bal_sim = get_bundle_balance(_tag_sim)
+
+        if bal_sim is None:
+            st.error(
+                "⚠️ No existe un balance hídrico calculado con **%s**. "
+                "Vaya a la Pestaña 2, seleccione la fuente '%s (serie de Pestaña 1)' y ejecute "
+                "'Calcular Balance Hídrico y Caudales de Diseño'. "
+                "La simulación no se ejecutará con la demanda de la otra fuente." % (
+                    _nombre_fuente(_tag_sim), _nombre_fuente(_tag_sim))
+            )
         else:
             with st.spinner("Simulando balance volumétrico y calculando optimización agronómica... 🌊"):
-                # Reconstruir df_chrono desde la fuente elegida si es posible
-                # Pestaña 2 genera df_chrono desde df_base_diario_tab1 (última fuente cargada en P1)
-                # Si el usuario quiere simular con la otra fuente, usamos el df_base guardado
-                if usar_nasa_sim and 'df_base_nasa' in st.session_state:
-                    df_base_fuente = st.session_state['df_base_nasa'].copy()
-                    etiqueta_fuente = "NASA POWER"
-                elif usar_wapor_sim and 'df_base_wapor' in st.session_state:
-                    df_base_fuente = st.session_state['df_base_wapor'].copy()
-                    etiqueta_fuente = "WaPOR v3"
-                else:
-                    df_base_fuente = None
-                    etiqueta_fuente = "última fuente cargada"
+                etiqueta_fuente   = bal_sim['fuente']
+                df_chrono         = bal_sim['df_chrono'].copy()
+                tipo_riego        = bal_sim['tipo_riego']
+                q_diseno_decadal  = (bal_sim['q_diseno_goteo'] if tipo_riego == "Riego por goteo"
+                                     else bal_sim['q_diseno_aspersion'])
+                t_max             = bal_sim.get('t_max', 12)
+                area_cultivo_ha   = bal_sim.get('area_total_ha', 0.5)
+                ef_global_sim     = bal_sim.get('ef_total', None)
 
-                df_chrono = st.session_state['df_chrono'].copy()
+                st.info(
+                    "🔄 Simulando con la cadena completa de **%s**: %d años (%s), "
+                    "demanda calculada con la RET de esta misma fuente, eficiencia global %.2f, %s."
+                    % (etiqueta_fuente, bal_sim.get('n_anios', df_chrono['Año'].nunique()),
+                       bal_sim.get('periodo', 'N/D'), (ef_global_sim or 0.0), tipo_riego)
+                )
 
-                # Si tenemos la base de la fuente seleccionada, reconstruir df_chrono con ella
-                if df_base_fuente is not None:
-                    if 'Decada_Año' not in df_base_fuente.columns:
-                        df_base_fuente = agregar_decadas(df_base_fuente)
-                    df_chrono_fuente = df_base_fuente.groupby(['Año', 'Decada_Año'])[['Precipitacion', 'Evaporacion', 'RET']].sum().reset_index()
-                    # Agregar Kc y Rb_mm desde el df_balance de Pestaña 2
-                    df_balance_t2 = st.session_state.get('df_balance_t2', None)
-                    if df_balance_t2 is not None:
-                        kc_map_f = dict(zip(df_balance_t2['Decada_Año'], df_balance_t2['Kc']))
-                        rb_map_f = dict(zip(df_balance_t2['Decada_Año'], df_balance_t2['Rb_mm']))
-                        df_chrono_fuente['Kc']    = df_chrono_fuente['Decada_Año'].map(kc_map_f).fillna(0)
-                        df_chrono_fuente['Rb_mm'] = df_chrono_fuente['Decada_Año'].map(rb_map_f).fillna(0)
-                    df_chrono = df_chrono_fuente
-                    st.info(f"🔄 Simulando con datos de **{etiqueta_fuente}** ({df_chrono['Año'].nunique()} años).")
-                q_diseno_decadal = st.session_state['q_diseno_decadal']
-                t_max = st.session_state.get('t_max', 12)
-                area_cultivo_ha = st.session_state.get('area_total_ha', 0.5)
-                tipo_riego = st.session_state.get('tipo_riego_calc', st.session_state.get('tipo_riego', 'Riego por goteo'))
+                # Sincronizar claves legacy con la fuente EFECTIVAMENTE simulada,
+                # para que los anexos Word y las gráficas posteriores sean coherentes.
+                st.session_state['df_chrono']           = df_chrono.copy()
+                st.session_state['q_diseno_decadal']    = q_diseno_decadal
+                st.session_state['df_balance_t2']       = bal_sim['df_balance'].copy()
+                st.session_state['t2_ef_total_calc']    = ef_global_sim
+                st.session_state['area_total_ha']       = area_cultivo_ha
+                st.session_state['tipo_riego_calc']     = tipo_riego
+                st.session_state['fuente_balance_activa'] = _tag_sim
                 
                 # ---------------------------------------------------------
                 # 1. GEOMETRÍA INICIAL (AQUÍ ENTRA EL IF/ELSE DEL TIPO DE RESERVORIO)
@@ -2426,7 +2717,30 @@ with tab3:
                 df_simulacion = pd.DataFrame(resultados_simulacion)
                 st.session_state['df_simulacion_reservorio'] = df_simulacion # Lo guardamos para exportarlo al Word después
 
-                # ── Guardar separado por fuente para Pestaña 4 ──
+                # ── SNAPSHOT INMUTABLE POR FUENTE PARA LA PESTAÑA 4 ──
+                # Se congelan aquí todos los descriptores de la corrida (años
+                # reales, periodo, geometría, tipo de riego, eficiencia). La
+                # Tabla 7 se construye leyendo estos snapshots, de modo que la
+                # fila de NASA nunca se ve alterada por una corrida de WaPOR.
+                _anios_sim = sorted(df_chrono['Año'].unique().tolist())
+                _periodo_sim, _n_anios_sim = periodo_serie(_anios_sim)
+                set_snapshot_sim(_tag_sim, {
+                    'fuente':        etiqueta_fuente,
+                    'df_sim':        df_simulacion.copy(),
+                    'lista_anios':   _anios_sim,
+                    'n_anios':       _n_anios_sim,
+                    'periodo':       _periodo_sim,
+                    'v_max':         v_max,
+                    'tipo_riego':    tipo_riego,
+                    'ef_total':      ef_global_sim,
+                    'area_total_ha': area_cultivo_ha,
+                    'tipo_almacenamiento': tipo_almacenamiento,
+                    'v_rippl':       None,   # se completa tras la búsqueda Rippl
+                    'v_rippl_ultimo': None,  # se completa tras el ciclo único
+                    'anio_ultimo':   None,
+                    'timestamp':     pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
+                })
+
                 if usar_nasa_sim:
                     st.session_state['df_simulacion_nasa']  = df_simulacion.copy()
                     st.session_state['fuente_sim_activa']   = 'NASA POWER'
@@ -2439,11 +2753,18 @@ with tab3:
                 st.session_state['historial_simulaciones'][nombre_guardado_key] = {
                     'df_sim':  df_simulacion.copy(),
                     'fuente':  etiqueta_fuente,
-                    'n_anios': df_chrono['Año'].nunique(),
+                    'fuente_tag': _tag_sim,
+                    'n_anios': _n_anios_sim,
+                    'lista_anios': _anios_sim,
+                    'periodo': _periodo_sim,
                     'v_max':   v_max,
                     'v_rippl': None,  # se actualizará tras el cálculo Rippl abajo
-                    'tipo_riego': st.session_state.get('tipo_riego_calc', tipo_riego),
-                    'eficiencia_global': st.session_state.get('t2_ef_total_calc', None),
+                    'v_rippl_ultimo': None,
+                    'anio_ultimo': None,
+                    'tipo_riego': tipo_riego,
+                    'area_total_ha': area_cultivo_ha,
+                    'tipo_almacenamiento': tipo_almacenamiento,
+                    'eficiencia_global': ef_global_sim,
                     'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M'),
                 }
 
@@ -2893,6 +3214,7 @@ with tab3:
                         # Guardar V* en sesión para Pestaña 4 (general y por fuente)
                         st.session_state['v_rippl_optimo'] = v_rippl
                         st.session_state['df_simulacion_reservorio_rippl'] = df_simulacion.copy()
+                        update_snapshot_sim(_tag_sim, v_rippl=float(v_rippl))
                         if usar_nasa_sim:
                             st.session_state['v_rippl_nasa']  = v_rippl
                         else:
@@ -2954,6 +3276,12 @@ with tab3:
                     if v_rippl_ultimo is not None:
                         st.info(
                             f"📌 **Referencia convencional (ciclo único, año {anio_max_serie}):** "                            f"V* = {v_rippl_ultimo:.0f} m³ — volumen mínimo necesario para sostener el cultivo "                            f"usando únicamente el último año disponible de la serie, sin continuidad multianual. "                            f"Este valor sustituye la referencia P75% de década crítica en la Tabla 7."                        )
+                        update_snapshot_sim(_tag_sim,
+                                            v_rippl_ultimo=float(v_rippl_ultimo),
+                                            anio_ultimo=int(anio_max_serie))
+                        if nombre_guardado_key in st.session_state['historial_simulaciones']:
+                            st.session_state['historial_simulaciones'][nombre_guardado_key]['v_rippl_ultimo'] = v_rippl_ultimo
+                            st.session_state['historial_simulaciones'][nombre_guardado_key]['anio_ultimo'] = anio_max_serie
                         if usar_nasa_sim:
                             st.session_state['v_rippl_ultimo_anio_nasa'] = v_rippl_ultimo
                             st.session_state['anio_ultimo_nasa'] = anio_max_serie
@@ -2966,20 +3294,24 @@ with tab3:
                     st.warning(f"No se pudo calcular el V* de referencia convencional (último año): {e_ultimo}")
 
                 # ─────────────────────────────────────────────────────────
-                # CURVA PARAMÉTRICA V* vs VENTANA DE AÑOS SIMULADOS (NASA POWER)
+                # CURVA PARAMÉTRICA V* vs VENTANA DE AÑOS SIMULADOS
                 # Sección 7.1 — sensibilidad del volumen óptimo frente a la
                 # longitud de la ventana histórica analizada (Rippl moderno
-                # con ventanas crecientes sobre la serie NASA POWER).
+                # con ventanas crecientes). Se construye para la fuente que se
+                # esté simulando (NASA o WaPOR) y las ventanas se derivan de la
+                # longitud REAL de la serie, incluyendo siempre como último
+                # punto el total de años efectivamente procesados.
                 # ─────────────────────────────────────────────────────────
-                if usar_nasa_sim:
+                if True:
                     st.divider()
-                    st.subheader("📈 Sensibilidad de V* frente a la Ventana Histórica Simulada (NASA POWER)")
+                    st.subheader("📈 Sensibilidad de V* frente a la Ventana Histórica Simulada (%s)"
+                                 % etiqueta_fuente)
                     st.caption(
-                        "Curva paramétrica V* vs número de años simulados (ventanas crecientes: 3, 5, 8, 10, 15 "
-                        "y 18 años), construida ejecutando la búsqueda iterativa de Rippl moderno sobre tramos "
-                        "consecutivos de la serie NASA POWER. Permite evidenciar empíricamente la sensibilidad "
-                        "del V* frente a la longitud del horizonte histórico y reforzar la recomendación "
-                        "metodológica sobre el periodo mínimo de análisis."
+                        "Curva paramétrica V* vs número de años simulados, construida ejecutando la búsqueda "
+                        "iterativa de Rippl moderno sobre tramos consecutivos de la serie de %s. Las ventanas "
+                        "se ajustan automáticamente a la longitud real de la serie y el último punto "
+                        "corresponde siempre al total de años procesados, de modo que la curva nunca reporta "
+                        "horizontes que no existan en los datos." % etiqueta_fuente
                     )
                     try:
                         import plotly.graph_objects as go
@@ -3018,7 +3350,12 @@ with tab3:
 
                         anios_disponibles_chrono = sorted(df_chrono['Año'].unique())
                         n_anios_totales = len(anios_disponibles_chrono)
-                        ventanas_objetivo = [3, 5, 8, 10, 15, 18]
+                        # Ventanas dinámicas: escalones estándar que quepan en la
+                        # serie + el total real de años procesados como cierre.
+                        _escalones = [3, 5, 8, 10, 15, 20, 25, 30]
+                        ventanas_objetivo = sorted(set(
+                            [w for w in _escalones if w <= n_anios_totales] + [n_anios_totales]
+                        ))
 
                         filas_curva = []
                         for vent in ventanas_objetivo:
@@ -3048,7 +3385,7 @@ with tab3:
                                 annotation_text=f"Reservorio comercial de referencia ({VOLUMEN_COMERCIAL_REF:.0f} m³)"
                             )
                             fig_curva_vstar.update_layout(
-                                title="V* vs Número de Años Simulados (Rippl moderno, ventanas crecientes — NASA POWER)",
+                                title="V* vs Número de Años Simulados (Rippl moderno, ventanas crecientes — %s)" % etiqueta_fuente,
                                 xaxis_title="Ventana de simulación (años)",
                                 yaxis_title="Volumen Útil Rippl V* (m³)",
                                 height=400
@@ -3066,13 +3403,16 @@ with tab3:
                                 "reservorio comercial de referencia (290 m³) que sería requerido por el V* "
                                 "identificado en cada ventana histórica. Valores crecientes con la longitud de "
                                 "la ventana evidencian la necesidad de series históricas suficientemente largas "
-                                "para no subestimar el volumen de diseño."
+                                "para no subestimar el volumen de diseño. Serie empleada: %s, %d años (%s)."
+                                % (etiqueta_fuente, n_anios_totales,
+                                   periodo_serie(anios_disponibles_chrono)[0])
                             )
+                            update_snapshot_sim(_tag_sim, curva_vstar=df_curva_vstar.copy())
                         else:
                             st.info(
-                                "No hay suficientes años disponibles en la serie NASA POWER para construir la "
-                                "curva con las ventanas solicitadas (3, 5, 8, 10, 15, 18 años). Amplíe el periodo "
-                                "de descarga en la Pestaña 1/2."
+                                "La serie de %s solo tiene %d año(s) procesado(s): se requieren al menos dos "
+                                "ventanas para trazar la curva de sensibilidad. Amplíe el periodo en la Pestaña 1."
+                                % (etiqueta_fuente, n_anios_totales)
                             )
                     except Exception as e_curva_vstar:
                         st.warning(f"No se pudo construir la curva V* vs ventana histórica: {e_curva_vstar}")
@@ -3137,16 +3477,21 @@ with tab4:
 
     # Indicadores de disponibilidad de simulaciones
     col_sim_ind1, col_sim_ind2 = st.columns(2)
-    with col_sim_ind1:
-        if df_sim_nasa is not None:
-            st.success(f"✅ Simulación NASA: {df_sim_nasa['Año'].nunique()} años | V* = {v_rippl_nasa:.0f} m³" if v_rippl_nasa else f"✅ Simulación NASA disponible ({df_sim_nasa['Año'].nunique()} años)")
-        else:
-            st.warning("⚠️ Simulación NASA: ejecute Pestaña 3 con fuente NASA POWER")
-    with col_sim_ind2:
-        if df_sim_wapor is not None:
-            st.success(f"✅ Simulación WaPOR: {df_sim_wapor['Año'].nunique()} años | V* = {v_rippl_wapor:.0f} m³" if v_rippl_wapor else f"✅ Simulación WaPOR disponible ({df_sim_wapor['Año'].nunique()} años)")
-        else:
-            st.warning("⚠️ Simulación WaPOR: ejecute Pestaña 3 con fuente WaPOR v3")
+    for _colind, _tagind in [(col_sim_ind1, 'NASA'), (col_sim_ind2, 'WAPOR')]:
+        with _colind:
+            _snind = get_snapshot_sim(_tagind)
+            if _snind is not None:
+                _vind = _snind.get('v_rippl')
+                st.success("✅ Simulación %s — %d años (%s)%s" % (
+                    _nombre_fuente(_tagind), _snind.get('n_anios', 0),
+                    _snind.get('periodo', 'N/D'),
+                    (" | V* = %.0f m³" % _vind) if _vind is not None else " | V* pendiente"))
+                st.caption("Corrida del %s · %s · Ef. global %s" % (
+                    _snind.get('timestamp', '—'), _snind.get('tipo_riego', '—'),
+                    ("%.2f" % _snind['ef_total']) if _snind.get('ef_total') else "N/D"))
+            else:
+                st.warning("⚠️ Simulación %s: ejecute la Pestaña 2 y la Pestaña 3 con esta fuente"
+                           % _nombre_fuente(_tagind))
 
     st.divider()
 
@@ -3162,83 +3507,139 @@ with tab4:
     anio_ultimo_nasa = st.session_state.get('anio_ultimo_nasa', None)
     anio_ultimo_wapor = st.session_state.get('anio_ultimo_wapor', None)
 
+    # ─────────────────────────────────────────────────────────────────────
+    # CONSTRUCCIÓN DE LA TABLA 7 A PARTIR DE LOS SNAPSHOTS POR FUENTE
+    # ---------------------------------------------------------------------
+    # Reglas de construcción:
+    #  1. UNA sola fila multianual por fuente, con el número de años
+    #     REALMENTE procesado (si se procesan 26 años, la fila dice 26; no
+    #     se generan filas artificiales de 10/20/30 años).
+    #  2. Cada fila lee el V* del snapshot de SU propia fuente; el V* de NASA
+    #     no se ve afectado por una corrida posterior de WaPOR ni viceversa.
+    #  3. La cobertura ENSO se deriva de los años efectivamente presentes en
+    #     la serie, cruzándolos con el catálogo EPISODIOS_ENSO.
+    # ─────────────────────────────────────────────────────────────────────
+    snaps_t7 = st.session_state.get('sim_por_fuente', {})
+
     filas_t7 = []
-    if v_rippl_ultimo_wapor is not None:
-        filas_t7.append({
-            "Ventana de análisis": f"Ciclo único — último año WaPOR ({anio_ultimo_wapor})",
-            "Fuente": "Referencia convencional",
-            "Años": "1",
-            "V* estimado (m³)": f"{v_rippl_ultimo_wapor:.0f}",
-            "Eventos ENSO cubiertos": "0 (no aplica)",
-            "Observación": "Dimensionamiento convencional sin continuidad multianual (Rippl sobre 1 año, fuente WaPOR)"
-        })
-    if v_rippl_ultimo_nasa is not None:
-        filas_t7.append({
-            "Ventana de análisis": f"Ciclo único — último año NASA ({anio_ultimo_nasa})",
-            "Fuente": "Referencia convencional",
-            "Años": "1",
-            "V* estimado (m³)": f"{v_rippl_ultimo_nasa:.0f}",
-            "Eventos ENSO cubiertos": "0 (no aplica)",
-            "Observación": "Dimensionamiento convencional sin continuidad multianual (Rippl sobre 1 año, fuente NASA POWER)"
-        })
+
+    # --- Bloque 1: referencia convencional de ciclo único (por fuente) ---
+    for _tag7 in ['WAPOR', 'NASA']:
+        _sn = snaps_t7.get(_tag7)
+        if _sn and _sn.get('v_rippl_ultimo') is not None:
+            _anio_u = _sn.get('anio_ultimo')
+            filas_t7.append({
+                "Ventana de análisis": "Ciclo único — último año %s (%s)" % (
+                    _nombre_fuente(_tag7), _anio_u),
+                "Fuente": "Referencia convencional",
+                "Años": "1",
+                "Periodo": str(_anio_u),
+                "V* estimado (m³)": "%.0f" % _sn['v_rippl_ultimo'],
+                "Eventos ENSO cubiertos": enso_texto([_anio_u]) if _anio_u else "0 (no aplica)",
+                "Observación": "Dimensionamiento convencional sin continuidad multianual "
+                               "(Rippl sobre 1 año, clima y demanda de %s)" % _nombre_fuente(_tag7),
+            })
+
     if not filas_t7:
         filas_t7.append({
             "Ventana de análisis": "Ciclo único (referencia convencional)",
             "Fuente": "Referencia convencional",
             "Años": "1",
+            "Periodo": "N/D",
             "V* estimado (m³)": "N/D (ejecute Pestaña 3)",
             "Eventos ENSO cubiertos": "0 (no aplica)",
-            "Observación": "Ejecute la simulación en Pestaña 3 con NASA y/o WaPOR para calcular el V* del último año"
+            "Observación": "Ejecute la simulación en Pestaña 3 con NASA y/o WaPOR "
+                           "para calcular el V* del último año",
         })
 
-    # Fila WaPOR — usa su propio V* Rippl
-    if wapor_ok:
-        v_wapor_str = (f"{v_rippl_wapor:.0f}" if v_rippl_wapor
-                       else ("Ejecute Pestaña 3 con WaPOR" if df_sim_wapor is None
-                             else f"{v_max_sim:.0f} (sin Rippl)"))
-        filas_t7.append({
-            "Ventana de análisis": f"WaPOR v3 ({anios_wapor_n} años)",
-            "Fuente": "WaPOR v3",
-            "Años": str(anios_wapor_n),
-            "V* estimado (m³)": v_wapor_str,
-            "Eventos ENSO cubiertos": "2023-2024 (único evento ENSO con cobertura completa)" if anios_wapor_n >= 6 else f"~{max(0, anios_wapor_n-2)} años disponibles",
-            "Observación": "Alta resolución espacial (30-250 m). Aunque el producto WaPOR v3 existe desde ~2009, los valores con cobertura confiable y continua para esta zona inician en 2018, por lo que el evento El Niño 2015-2016 no queda representado en la serie; solo el evento ENSO 2023-2024 es analizable."
-        })
+    # --- Bloque 2: una fila multianual por fuente, con años reales ---
+    for _tag7, _dispo7 in [('WAPOR', wapor_ok), ('NASA', nasa_ok)]:
+        _sn = snaps_t7.get(_tag7)
+        _nom7 = _nombre_fuente(_tag7)
 
-    # Filas NASA según ventana — usa su propio V* Rippl
-    if nasa_ok and df_nasa_base is not None:
-        n_filas_antes_nasa = len(filas_t7)
-        for ventana, label, enso_txt in [
-            (10, "10 años", "2015-2016"),
-            (20, "20 años", "2005-2016"),
-            (30, "30 años (OMM)", "1997-98, 2002-03, 2015-16, 2023-24"),
-        ]:
-            if anios_nasa_n >= ventana:
-                v_nasa_str = (f"{v_rippl_nasa:.0f}" if v_rippl_nasa
-                              else ("Ejecute Pestaña 3 con NASA" if df_sim_nasa is None
-                                    else f"{v_max_sim:.0f} (sin Rippl)"))
+        if _sn is None:
+            if _dispo7:
+                _n_dec = (anios_wapor_n if _tag7 == 'WAPOR' else anios_nasa_n)
+                _lst_dec = st.session_state.get(
+                    'lista_anios_wapor' if _tag7 == 'WAPOR' else 'lista_anios_nasa', [])
+                _per_dec, _ = periodo_serie(_lst_dec)
                 filas_t7.append({
-                    "Ventana de análisis": f"NASA POWER ({label})",
-                    "Fuente": "NASA POWER",
-                    "Años": str(ventana),
-                    "V* estimado (m³)": v_nasa_str,
-                    "Eventos ENSO cubiertos": enso_txt,
-                    "Observación": "Serie larga, estándar OMM" if ventana == 30 else "Serie media"
+                    "Ventana de análisis": "%s (%d años cargados)" % (_nom7, _n_dec),
+                    "Fuente": _nom7,
+                    "Años": str(_n_dec),
+                    "Periodo": _per_dec,
+                    "V* estimado (m³)": "Ejecute Pestaña 2 y 3 con %s" % _nom7,
+                    "Eventos ENSO cubiertos": enso_texto(_lst_dec),
+                    "Observación": "Serie disponible en Pestaña 1, pendiente de simulación propia",
                 })
-        if len(filas_t7) == n_filas_antes_nasa:  # no se agregó ninguna ventana NASA
-            v_nasa_str = (f"{v_rippl_nasa:.0f}" if v_rippl_nasa else "Ejecute Pestaña 3 con NASA")
-            filas_t7.append({
-                "Ventana de análisis": f"NASA POWER ({anios_nasa_n} años disponibles)",
-                "Fuente": "NASA POWER",
-                "Años": str(anios_nasa_n),
-                "V* estimado (m³)": v_nasa_str,
-                "Eventos ENSO cubiertos": "Según serie",
-                "Observación": "Amplíe el período de descarga para mayor cobertura ENSO"
-            })
+            continue
+
+        _lst7 = _sn.get('lista_anios', [])
+        _n7 = _sn.get('n_anios', len(_lst7))
+        _per7 = _sn.get('periodo', 'N/D')
+        _v7 = _sn.get('v_rippl')
+        _v7_txt = ("%.0f" % _v7) if _v7 is not None else "Sin V* (repita la simulación en Pestaña 3)"
+
+        if _tag7 == 'WAPOR':
+            _obs7 = ("Alta resolución espacial (30–250 m). La cobertura confiable y continua de "
+                     "WaPOR v3 en esta zona inicia en 2018, por lo que los episodios anteriores a "
+                     "esa fecha no son representables en esta serie.")
+        else:
+            _obs7 = ("Serie larga de baja resolución espacial (~50 km). %s" % (
+                "Cumple el estándar OMM de 30 años." if _n7 >= 30 else
+                "Ventana de %d años: por debajo del estándar OMM de 30 años, "
+                "aunque suficiente para cubrir los episodios ENSO listados." % _n7))
+
+        filas_t7.append({
+            "Ventana de análisis": "%s (%d años procesados)" % (_nom7, _n7),
+            "Fuente": _nom7,
+            "Años": str(_n7),
+            "Periodo": _per7,
+            "V* estimado (m³)": _v7_txt,
+            "Eventos ENSO cubiertos": enso_texto(_lst7),
+            "Observación": "%s Riego: %s | Eficiencia global: %s" % (
+                _obs7, _sn.get('tipo_riego', '—'),
+                ("%.2f" % _sn['ef_total']) if _sn.get('ef_total') else "N/D"),
+        })
 
     df_tabla7 = pd.DataFrame(filas_t7)
     st.dataframe(df_tabla7, use_container_width=True, hide_index=True)
-    st.caption(f"Fuente: Elaboración propia ADR {ANO_ACTUAL}. Referencia metodológica: Rippl (1883), modernizado por McMahon & Adeloye (2005).")
+    st.session_state['df_tabla7'] = df_tabla7.copy()
+    st.caption(
+        f"Fuente: Elaboración propia ADR {ANO_ACTUAL}. Referencia metodológica: Rippl (1883), "
+        f"modernizado por McMahon & Adeloye (2005). La columna 'Años' refleja el número de años "
+        f"efectivamente procesados en cada serie y la cobertura ENSO se determina cruzando esos "
+        f"años con el catálogo de episodios del índice ONI (NOAA/CPC); solo se listan episodios "
+        f"cálidos (El Niño) de intensidad moderada o superior, por ser los que condicionan el "
+        f"déficit y, por tanto, el dimensionamiento del reservorio."
+    )
+
+    # ── Verificación explícita de independencia entre fuentes ──
+    _sn_n = snaps_t7.get('NASA')
+    _sn_w = snaps_t7.get('WAPOR')
+    if _sn_n and _sn_w:
+        _mismo_periodo = _sn_n.get('periodo') == _sn_w.get('periodo')
+        _msg_ind = (
+            "🔒 **Independencia verificada:** el V* de NASA POWER (%s m³, %s) se calculó con la "
+            "serie y la demanda de NASA, y el de WaPOR v3 (%s m³, %s) con las de WaPOR. Cada valor "
+            "queda congelado en su propio snapshot y no se recalcula al ejecutar la otra fuente."
+            % (("%.0f" % _sn_n['v_rippl']) if _sn_n.get('v_rippl') else "N/D",
+               _sn_n.get('periodo', 'N/D'),
+               ("%.0f" % _sn_w['v_rippl']) if _sn_w.get('v_rippl') else "N/D",
+               _sn_w.get('periodo', 'N/D'))
+        )
+        st.info(_msg_ind)
+        if _mismo_periodo:
+            st.caption(
+                "ℹ️ Ambas series comparten el mismo periodo; las diferencias de V* provienen "
+                "únicamente de la precipitación y la evapotranspiración de cada producto."
+            )
+        else:
+            st.caption(
+                "ℹ️ Las series cubren periodos distintos, por lo que la comparación de V* mezcla "
+                "el efecto del producto satelital con el de la longitud de la ventana histórica. "
+                "Para una comparación estricta, procese ambas fuentes sobre el mismo periodo."
+            )
 
     st.divider()
 
@@ -3554,6 +3955,30 @@ with tab4:
     else:
         v_ciclo_unico_t9 = "N/D"
 
+    def _enso_t9(tag, disponible):
+        """Cobertura ENSO real de la fuente, derivada de sus años procesados."""
+        if not disponible:
+            return "Sin datos"
+        _sn9 = get_snapshot_sim(tag)
+        _lst9 = (_sn9.get('lista_anios') if _sn9 else
+                 st.session_state.get('lista_anios_nasa' if tag == 'NASA' else 'lista_anios_wapor', []))
+        if not _lst9:
+            return "Sin datos"
+        _c9, _p9 = enso_cobertura(_lst9)
+        _per9, _n9 = periodo_serie(_lst9)
+        if not _c9:
+            return "0 episodios completos en %d años (%s)" % (_n9, _per9)
+        return "%d episodio(s) en %d años (%s): %s" % (len(_c9), _n9, _per9, "; ".join(_c9))
+
+    def _periodo_t9(tag, disponible, nota):
+        if not disponible:
+            return "Sin datos"
+        _sn9 = get_snapshot_sim(tag)
+        _lst9 = (_sn9.get('lista_anios') if _sn9 else
+                 st.session_state.get('lista_anios_nasa' if tag == 'NASA' else 'lista_anios_wapor', []))
+        _per9, _n9 = periodo_serie(_lst9)
+        return "%d años (%s) — %s" % (_n9, _per9, nota)
+
     df_t9_filas = [
         {"Dimensión evaluada": "Volumen óptimo identificado (m³)",
          "Ciclo único (últ. año)": v_ciclo_unico_t9,
@@ -3562,9 +3987,9 @@ with tab4:
          "Observación": "El Rippl captura episodios ENSO severos; el ciclo único solo cubre el último año"},
         {"Dimensión evaluada": "Eventos ENSO verificados",
          "Ciclo único (últ. año)": "0 (no aplica)",
-         "Rippl NASA POWER": f"Sí — {anios_nasa_n} años" if nasa_ok else "Sin datos",
-         "Rippl WaPOR v3": f"Sí — {anios_wapor_n} años" if wapor_ok else "Sin datos",
-         "Observación": "El ciclo único no verifica eventos extremos"},
+         "Rippl NASA POWER": _enso_t9('NASA', nasa_ok),
+         "Rippl WaPOR v3": _enso_t9('WAPOR', wapor_ok),
+         "Observación": "Episodios El Niño (≥ moderado) contenidos íntegramente en cada serie"},
         {"Dimensión evaluada": "Aval de no-vaciado",
          "Ciclo único (últ. año)": "Explícito, pero solo sobre 1 año (Rippl)",
          "Rippl NASA POWER": "Explícito (operacional)" if df_sim_nasa is not None else "Pendiente simulación",
@@ -3580,10 +4005,10 @@ with tab4:
          "Rippl NASA POWER": "~50 km (global)",
          "Rippl WaPOR v3": "30–250 m (África/MENA/Colombia)",
          "Observación": "NASA: extensión temporal. WaPOR: resolución espacial."},
-        {"Dimensión evaluada": "Extensión temporal disponible",
+        {"Dimensión evaluada": "Extensión temporal procesada",
          "Ciclo único (últ. año)": "1 año (último disponible)",
-         "Rippl NASA POWER": f"{anios_nasa_n} años (desde 1981)" if nasa_ok else "Sin datos",
-         "Rippl WaPOR v3": f"{anios_wapor_n} años (cobertura útil desde 2018)" if wapor_ok else "Sin datos",
+         "Rippl NASA POWER": _periodo_t9('NASA', nasa_ok, "producto disponible desde 1981"),
+         "Rippl WaPOR v3": _periodo_t9('WAPOR', wapor_ok, "cobertura útil desde 2018"),
          "Observación": "NASA recomendada para análisis OMM (≥30 años)"},
         {"Dimensión evaluada": "Trazabilidad documental",
          "Ciclo único (últ. año)": "Limitada",
